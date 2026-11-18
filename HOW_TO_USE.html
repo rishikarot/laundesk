@@ -1,0 +1,84 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Laundry Desk — How to Use</title><style>body{font:16px/1.55 system-ui;margin:0;background:#f4f1e8;color:#111}main{max-width:820px;margin:auto;padding:28px}h1,h2,h3{text-transform:uppercase;letter-spacing:-.02em}h1{font-size:38px;border-bottom:5px solid #111;padding-bottom:12px}h2{margin-top:38px;border-top:2px solid #111;padding-top:14px}p,pre{background:#fff;border:2px solid #111;padding:12px;margin:8px 0}pre{overflow:auto}.item{background:#dfff45}</style></head><body><main><h1>Laundry Desk — How to Use</h1>
+<p>This guide is written for day-to-day laundry staff. Use the app on a phone, tablet or desktop browser.</p>
+<h2>1. Sign in</h2>
+<p>Open Laundry Desk. Enter your login/mobile number and your six-digit code. You do not choose a role; the system opens the correct workspace automatically.</p>
+<p>Demo accounts:</p>
+<pre>| User | Login | Code |</pre>
+<pre>|---|---|---:|</pre>
+<pre>| Admin | `admin` | `111111` |</pre>
+<pre>| Manager | `manager` | `222222` |</pre>
+<pre>| Delivery | `driver` | `333333` |</pre>
+<pre>| Customer | `+971501234567` | `444444` |</pre>
+<h2>2. Admin</h2>
+<p>Use Admin for setup, not for daily laundry work.</p>
+<h3>Staff</h3>
+<p>Go to Admin → Staff. Add Admin, Manager or Delivery users. Enter a six-digit code or leave it blank and Laundry Desk generates one and shows it once. Use Edit to change role, phone, login or disable the account.</p>
+<h3>Customers</h3>
+<p>Go to Admin → Customers. You can enable/disable customer app access and reset a customer&#x27;s six-digit code. After a reset, the new code is shown immediately; share it privately.</p>
+<h3>Garments and services</h3>
+<p>Go to Admin → Catalog. Add or edit garment types such as Shirt, Trouser or Abaya. Add/edit services such as Wash + Iron and Iron Only. Turn an item off instead of deleting it when it should no longer be offered.</p>
+<h3>Rates and discounts</h3>
+<p>Go to Admin → Rates to set the AED price for a garment + service combination. Rates have an effective date. Go to Discounts to maintain percentage/fixed discounts.</p>
+<h3>Reports</h3>
+<p>Go to Reports for active orders, outstanding money, payments received, customer credit and stage counts.</p>
+<h2>3. Manager — counter customer</h2>
+<p>1. Tap New → Counter order.</p>
+<p>2. Choose the customer.</p>
+<p>3. Choose Wash + Iron or Iron Only.</p>
+<p>4. Tap `+` next to each garment until the correct quantity is shown.</p>
+<p>5. Choose a discount only if applicable.</p>
+<p>6. If the customer pays now, enter the amount and payment method. Otherwise leave it blank.</p>
+<p>7. Tap Create Order.</p>
+<p>The order starts at Received. An Iron Only order automatically skips Washing later.</p>
+<h2>4. Manager — WhatsApp/phone pickup request</h2>
+<p>1. Tap New → Pickup request.</p>
+<p>2. Select the customer.</p>
+<p>3. Assign a Delivery user now, or assign later.</p>
+<p>4. Add any useful address/time note.</p>
+<p>5. Save.</p>
+<p>The order is now Pickup requested and appears to the assigned Delivery user.</p>
+<h2>5. Delivery — doorstep pickup</h2>
+<p>1. Sign in as Delivery and open Stops.</p>
+<p>2. Under Pickup stops, open the assigned customer.</p>
+<p>3. Tap Collect garments.</p>
+<p>4. Choose Wash + Iron or Iron Only.</p>
+<p>5. Tap `+ / −` to capture garments and quantities.</p>
+<p>6. Enter any payment collected at the door, or leave it blank.</p>
+<p>7. Tap Save + Collect.</p>
+<p>The price is calculated by the server from the configured rate card. The Delivery user cannot manually override the price.</p>
+<h2>6. Manager — laundry processing</h2>
+<p>Open the order and use the primary next-stage button.</p>
+<p>Normal order:</p>
+<pre>`Collected → Received → Washing → Ironing → Ready`</pre>
+<p>Iron Only:</p>
+<pre>`Collected/Received → Ironing → Ready`</pre>
+<p>When a pickup order becomes Ready, assign a Delivery user. Then move it to Out for delivery.</p>
+<p>For a counter order, after Ready you can hand it directly to the customer and mark it Delivered without creating a delivery stop.</p>
+<h2>7. Delivery — handover</h2>
+<p>1. Open Stops → Delivery stops.</p>
+<p>2. Open the order.</p>
+<p>3. Tap Deliver / Take Payment.</p>
+<p>4. Enter the payment actually received, or enter 0/leave blank when already paid.</p>
+<p>5. Tap Confirm Handover.</p>
+<p>Laundry Desk marks the laundry Delivered. Payment can still remain partial/outstanding because laundry status and payment status are separate.</p>
+<h2>8. Payments and customer credit</h2>
+<p>Manager/Admin can open any order and tap Record payment.</p>
+<p>If an order is AED 25 and the customer gives AED 30:</p>
+<p class="item">• AED 25 is applied to that order.</p>
+<p class="item">• AED 5 becomes customer credit.</p>
+<p>On the next unpaid order, open it and tap Apply AED 5.00 credit. Laundry Desk applies only the amount needed and keeps any remaining credit for later.</p>
+<h2>9. Receipt, PDF, QR and WhatsApp</h2>
+<p>Open an order:</p>
+<p class="item">• **Receipt / PDF** opens the print layout with the order QR. Choose **Save as PDF** in the browser print dialog.</p>
+<p class="item">• **Bag + garment tags** prints a bag label with the order QR plus individual tags containing Order ID, Customer Code and Piece Number.</p>
+<p class="item">• **WhatsApp** opens the customer&#x27;s chat with an order/status/payment message already filled. Attach the saved receipt PDF before sending.</p>
+<h2>10. Customer</h2>
+<p>A customer signs in using their UAE mobile number + six-digit code. They can:</p>
+<p class="item">• request a pickup,</p>
+<p class="item">• see only their own orders,</p>
+<p class="item">• see laundry status and payment status,</p>
+<p class="item">• see totals, paid amount, outstanding balance and available credit,</p>
+<p class="item">• open receipt/order details.</p>
+<p>They cannot see another customer&#x27;s data.</p>
+<h2>11. If something looks wrong</h2>
+<p>Do not create duplicate payments to “fix” a screen value. Refresh first. If the database amount is wrong, stop the transaction and let the Manager/Admin investigate. For a live pilot, keep one responsible person for rate changes and financial corrections.</p></main></body></html>
