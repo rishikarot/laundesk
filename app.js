@@ -12,6 +12,7 @@
     busy: false,
     qty: {},
     serviceId: null,
+    theme: localStorage.getItem("laundry_theme") || "#2563eb",
   };
   const app = document.getElementById("app");
   const toastEl = document.getElementById("toast");
@@ -21,6 +22,40 @@
   const roleName = r => ({admin:"Admin",manager:"Manager",delivery:"Delivery",customer:"Customer"}[r] || r);
   const id = x => document.getElementById(x);
 
+  const THEME_PRESETS = ["#2563eb","#0f766e","#7c3aed","#d65a31","#111827"];
+  function mixWithWhite(hex, amount=.91){
+    const h=String(hex||"").replace("#",""); if(!/^[0-9a-f]{6}$/i.test(h)) return "#eaf1ff";
+    const rgb=[0,2,4].map(i=>parseInt(h.slice(i,i+2),16));
+    const mixed=rgb.map(v=>Math.round(v*(1-amount)+255*amount));
+    return "#"+mixed.map(v=>v.toString(16).padStart(2,"0")).join("");
+  }
+  function applyTheme(color, persist=true){
+    if(!/^#[0-9a-f]{6}$/i.test(color||"")) color="#2563eb";
+    state.theme=color.toLowerCase();
+    document.documentElement.style.setProperty("--accent",state.theme);
+    document.documentElement.style.setProperty("--accent-soft",mixWithWhite(state.theme));
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content",state.theme);
+    if(persist) localStorage.setItem("laundry_theme",state.theme);
+  }
+  function icon(name, cls=""){
+    const paths={
+      home:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9 21v-7h6v7"/>',
+      orders:'<path d="M6 3h12v18H6z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+      plus:'<path d="M12 5v14M5 12h14"/>',
+      reports:'<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+      settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.97a1.7 1.7 0 0 0-.34-1.88L4.2 7.03 7.03 4.2l.06.06A1.7 1.7 0 0 0 8.97 4.6 1.7 1.7 0 0 0 10 3.04V3h4v.08a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15z"/>',
+      route:'<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h3a3 3 0 0 0 3-3V8a3 3 0 0 1 3-3"/>',
+      history:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
+      user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+      pickup:'<path d="M3 7h11v10H3zM14 10h4l3 3v4h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+      admin:'<path d="M4 5h16v14H4zM8 9h8M8 13h5"/>',
+      palette:'<path d="M12 3a9 9 0 0 0 0 18h1.2a1.8 1.8 0 0 0 1.4-2.9l-.4-.5a1.8 1.8 0 0 1 1.4-2.9H17a4 4 0 0 0 4-4A7.7 7.7 0 0 0 12 3z"/><circle cx="7.5" cy="10" r=".8"/><circle cx="10" cy="6.8" r=".8"/><circle cx="14" cy="6.8" r=".8"/>',
+      logout:'<path d="M10 17l5-5-5-5M15 12H3M14 3h7v18h-7"/>'
+    };
+    return `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${paths[name]||paths.home}</svg>`;
+  }
+  applyTheme(state.theme,false);
+
   function toast(message, error=false){
     toastEl.textContent = message; toastEl.className = "toast show" + (error ? " error" : "");
     clearTimeout(toast._t); toast._t = setTimeout(()=>toastEl.className="toast",2600);
@@ -29,7 +64,11 @@
   async function api(path, {method="GET", body=null, auth=true}={}){
     const headers = {"Content-Type":"application/json","apikey":cfg.publishableKey};
     if(auth && state.token) headers.Authorization = `Bearer ${state.token}`;
-    const res = await fetch(cfg.apiUrl + path, {method,headers,body:body?JSON.stringify(body):undefined});
+    const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),20000);
+    let res;
+    try{res=await fetch(cfg.apiUrl + path, {method,headers,body:body?JSON.stringify(body):undefined,signal:controller.signal})}
+    catch(e){if(e.name==="AbortError")throw new Error("Connection is taking too long. Please try again.");throw e}
+    finally{clearTimeout(timeout)}
     let payload = {};
     try{payload=await res.json()}catch{}
     if(!res.ok || payload.ok===false){
@@ -51,7 +90,7 @@
     finally{if(show) setBusy(false)}
   }
 
-  function setBusy(v){state.busy=v; document.body.style.cursor=v?"progress":"";}
+  function setBusy(v){state.busy=v; document.documentElement.classList.toggle("is-busy",v); document.body.style.cursor=v?"progress":"";}
   function validViews(role){
     if(role==="admin") return ["home","orders","admin","reports"];
     if(role==="manager") return ["home","orders","new","reports"];
@@ -61,31 +100,29 @@
 
   function navItems(role){
     const map={
-      admin:[["home","Home"],["orders","Orders"],["admin","Admin"],["reports","Reports"]],
-      manager:[["home","Home"],["orders","Orders"],["new","New"],["reports","Reports"]],
-      delivery:[["stops","Stops"],["orders","Orders"],["history","History"],["account","Account"]],
-      customer:[["home","Home"],["orders","Orders"],["pickup","Pickup"],["account","Account"]]
+      admin:[["home","Home","home"],["orders","Orders","orders"],["admin","Setup","admin"],["reports","Reports","reports"]],
+      manager:[["home","Home","home"],["orders","Orders","orders"],["new","Create","plus"],["reports","Reports","reports"]],
+      delivery:[["stops","Stops","route"],["orders","Orders","orders"],["history","History","history"],["account","Account","user"]],
+      customer:[["home","Home","home"],["orders","Orders","orders"],["pickup","Pickup","pickup"],["account","Account","user"]]
     }; return map[role] || [];
   }
 
   function renderLogin(){
     state.data=null;
     app.innerHTML=`<div class="login-wrap"><main class="login">
-      <div class="kicker">Dubai laundry operations</div>
-      <div class="login-logo">LAUNDRY<br><em>DESK</em></div>
+      <div class="login-brand"><div class="login-mark">L</div><div class="login-title">Laundry Desk<span>Simple laundry operations</span></div></div>
       <div class="card stack">
-        <div><h2>Sign in</h2><p class="sub">One entrance. Your account decides what you can see and do.</p></div>
+        <div><h2>Welcome back</h2><p class="sub">Use your staff login or customer mobile number.</p></div>
         <form id="loginForm" class="stack">
           <label>Login / UAE mobile<input id="loginIdentifier" class="input" autocomplete="username" placeholder="manager or +971..." required></label>
           <label>Six-digit code<input id="loginPin" class="input mono" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="current-password" placeholder="••••••" required></label>
-          <button class="btn dark block" type="submit">SIGN IN →</button>
+          <button class="btn primary block" type="submit">Sign in</button>
         </form>
-        <div class="security-note">Customer attempts are rate-limited on the server. The browser has no direct access to Laundry tables.</div>
+        <div class="security-note">Access is role-based and customer login attempts are rate-limited on the server.</div>
       </div>
-      <div class="section"><div class="kicker">Demo accounts — tap to fill</div><div class="demo-grid" style="margin-top:7px">
+      <div class="section"><div class="kicker">Demo accounts — tap to fill</div><div class="demo-grid" style="margin-top:8px">
         ${demo("Admin","admin","111111")}${demo("Manager","manager","222222")}${demo("Delivery","driver","333333")}${demo("Customer","+971501234567","444444")}
       </div></div>
-      <p class="small muted" style="margin-top:16px">Minimal Brutalism MVP · Supabase connected · Shared Apps project</p>
     </main></div>`;
     id("loginForm").addEventListener("submit",login);
   }
@@ -105,10 +142,15 @@
 
   function renderApp(){
     const d=state.data, a=d.actor, nav=navItems(a.role);
+    const navButtons=nav.map(([v,l,i])=>`<button class="navbtn ${state.view===v?'active':''}" data-view="${v}">${icon(i)}<span>${l}</span></button>`).join("");
     app.innerHTML=`<div class="shell">
-      <header class="topbar"><div class="topbar-inner"><div class="brand">Laundry <span>Desk</span></div><div class="actor"><span class="role">${roleName(a.role)}</span><span class="small strong">${esc(a.display_name)}</span><button class="btn ghost smallbtn" data-action="logout">Exit</button></div></div></header>
+      <header class="topbar"><div class="topbar-inner">
+        <div class="brand"><div class="brand-mark">L</div><div>Laundry <span>Desk</span></div></div>
+        <nav class="desktop-nav">${navButtons}</nav>
+        <div class="actor"><div class="actor-copy"><div class="actor-name">${esc(a.display_name)}</div><div class="actor-role">${roleName(a.role)}</div></div><button class="icon-btn" data-action="theme" aria-label="Theme">${icon("palette")}</button><button class="btn ghost smallbtn" data-action="logout">${icon("logout","sm")}<span>Exit</span></button></div>
+      </div></header>
       <main class="main">${renderView()}</main>
-      <nav class="bottomnav"><div class="bottomnav-inner" style="--nav-count:${nav.length}">${nav.map(([v,l])=>`<button class="navbtn ${state.view===v?'active':''}" data-view="${v}">${l}</button>`).join("")}</div></nav>
+      <nav class="bottomnav"><div class="bottomnav-inner" style="--nav-count:${nav.length}">${navButtons}</div></nav>
       ${state.modal||""}
     </div>`;
     bindDynamicForms();
@@ -123,32 +165,34 @@
   }
 
   function titleBlock(kicker,title,sub,actions=""){
-    return `<div class="row between"><div><div class="kicker">${kicker}</div><h1>${title}</h1>${sub?`<p class="sub">${sub}</p>`:""}</div>${actions}</div>`;
+    return `<div class="page-head"><div class="page-head-copy"><div class="kicker">${kicker}</div><h1>${title}</h1>${sub?`<p class="sub">${sub}</p>`:""}</div>${actions?`<div class="page-head-actions">${actions}</div>`:""}</div>`;
   }
 
   function metric(label,value,accent=false){return `<div class="card metric ${accent?'accent':''}"><div class="value">${value}</div><div class="label">${label}</div></div>`}
 
   function homeStaff(){
     const s=state.data.summary, role=state.data.actor.role;
-    const urgent=(state.data.orders||[]).filter(o=>["pickup_requested","ready"].includes(o.laundry_status)).slice(0,6);
-    return `${titleBlock("Operations / live","Today, at a glance","Only what needs action now.",role==="manager"?`<button class="btn primary" data-action="counter-order">+ Counter order</button>`:"")}
-      <div class="grid metrics">${metric("Active",s.active_orders,true)}${metric("Outstanding",fmt(s.outstanding))}${metric("Received",fmt(s.payments_received))}${metric("Customer credit",fmt(s.customer_credits))}</div>
-      <section class="section"><div class="section-head"><div><div class="kicker">Needs attention</div><h2>Next actions</h2></div></div>${urgent.length?`<div class="grid cards">${urgent.map(orderCard).join("")}</div>`:`<div class="empty">No urgent pickup or ready orders.</div>`}</section>
-      <section class="section"><div class="section-head"><div><div class="kicker">By stage</div><h2>Work queue</h2></div></div><div class="grid metrics">${STAGES.filter(([s])=>s!=="delivered").map(([s,l])=>metric(l,state.data.summary.stage_counts[s]||0)).join("")}</div></section>`;
+    const urgent=(state.data.orders||[]).filter(o=>["pickup_requested","ready"].includes(o.laundry_status)).slice(0,4);
+    const action=role==="manager"?`<button class="btn primary" data-action="counter-order">${icon("plus","sm")}New counter order</button>`:"";
+    return `${titleBlock("Today","Operations","What needs attention now.",action)}
+      <div class="grid metrics">${metric("Active orders",s.active_orders,true)}${metric("Outstanding",fmt(s.outstanding))}${metric("Collected",fmt(s.payments_received))}${metric("Customer credit",fmt(s.customer_credits))}</div>
+      <section class="section"><div class="section-head"><div><h2>Needs attention</h2><p class="sub small">Pickup requests and orders ready to hand over.</p></div></div>${urgent.length?`<div class="grid cards">${urgent.map(orderCard).join("")}</div>`:`<div class="empty">You are up to date. No urgent work right now.</div>`}</section>
+      <section class="section"><div class="section-head"><div><h2>Work by stage</h2></div></div><div class="queue-strip">${STAGES.filter(([k])=>k!=="delivered").map(([k,l])=>`<div class="queue-chip"><b>${s.stage_counts[k]||0}</b><span>${l}</span></div>`).join("")}</div></section>`;
   }
 
   function customerHome(){
     const orders=state.data.orders, active=orders.filter(o=>o.laundry_status!=="delivered"), credit=orders[0]?.customer_credit||0, out=orders.reduce((s,o)=>s+Number(o.outstanding),0);
-    return `${titleBlock("My laundry",`Hello, ${esc(state.data.actor.display_name.split(" ")[0])}`,"Track laundry and money separately. No calls needed.",`<button class="btn primary" data-view="pickup">Request pickup</button>`)}
-      <div class="grid metrics">${metric("Active orders",active.length,true)}${metric("Outstanding",fmt(out))}${metric("Available credit",fmt(credit))}${metric("All orders",orders.length)}</div>
-      <section class="section"><div class="section-head"><div><div class="kicker">Current</div><h2>Your active orders</h2></div></div>${active.length?`<div class="grid cards">${active.map(orderCard).join("")}</div>`:`<div class="empty">Nothing in progress. Request a pickup when ready.</div>`}</section>`;
+    return `${titleBlock("My laundry",`Hello, ${esc(state.data.actor.display_name.split(" ")[0])}`,"Everything about your laundry in one place.",`<button class="btn primary" data-view="pickup">${icon("pickup","sm")}Request pickup</button>`)}
+      <div class="grid metrics">${metric("Active",active.length,true)}${metric("Amount due",fmt(out))}${metric("Credit",fmt(credit))}${metric("Total orders",orders.length)}</div>
+      <section class="section"><div class="section-head"><div><h2>In progress</h2></div></div>${active.length?`<div class="grid cards">${active.map(orderCard).join("")}</div>`:`<div class="empty">No active orders. Request a pickup whenever you are ready.</div>`}</section>`;
   }
 
   function orderCard(o){
-    return `<article class="card order" data-order-card="${o.id}"><div class="order-head"><div><div class="order-no mono">${esc(o.order_no)}</div><div class="small muted">${esc(o.customer?.name||"")} · ${o.items.reduce((s,x)=>s+Number(x.quantity),0)} pcs</div></div><div class="money">${fmt(o.total)}</div></div>
-      <div class="order-meta"><span class="stage active">${stageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span>${o.channel==="counter"?`<span class="badge">counter</span>`:`<span class="badge">pickup</span>`}</div>
-      <div class="row between small"><span>Paid <b>${fmt(o.paid)}</b></span><span>Due <b>${fmt(o.outstanding)}</b></span>${o.customer_credit>0?`<span>Credit <b>${fmt(o.customer_credit)}</b></span>`:""}</div>
-      <button class="btn block" data-action="open-order" data-id="${o.id}">OPEN →</button></article>`;
+    const pieces=o.items.reduce((sum,x)=>sum+Number(x.quantity),0);
+    return `<article class="card order" data-order-card="${o.id}"><div class="order-head"><div><div class="order-no">${esc(o.order_no)}</div><div class="small muted">${esc(o.customer?.name||"")}${pieces?` · ${pieces} pcs`:""}</div></div><div class="money">${fmt(o.total)}</div></div>
+      <div class="order-meta"><span class="stage active">${stageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
+      <div class="order-money"><div><span>Paid</span><b>${fmt(o.paid)}</b></div><div><span>Due</span><b>${fmt(o.outstanding)}</b></div>${o.customer_credit>0?`<div><span>Credit</span><b>${fmt(o.customer_credit)}</b></div>`:""}<div><span>Type</span><b>${o.channel==="counter"?"Counter":"Pickup"}</b></div></div>
+      <button class="btn block" data-action="open-order" data-id="${o.id}">View order</button></article>`;
   }
 
   function ordersView(includeDelivered=true){
@@ -160,10 +204,10 @@
   }
 
   function newView(){
-    return `${titleBlock("Fast intake","Create","Choose the real-world situation. Everything else follows from it.")}
-      <div class="grid cards"><button class="card accent" data-action="counter-order" style="text-align:left"><div class="kicker">At the shop</div><h2>Counter order →</h2><p>Customer brings garments. Start directly at Received.</p></button>
-      <button class="card" data-action="pickup-request" style="text-align:left"><div class="kicker">WhatsApp / phone</div><h2>Pickup request →</h2><p>Log the request and assign a driver.</p></button>
-      <button class="card" data-action="new-customer" style="text-align:left"><div class="kicker">First visit</div><h2>Add customer →</h2><p>Create customer code and mobile access in one step.</p></button></div>`;
+    return `${titleBlock("Create","What do you want to do?","Choose one action. The app handles the correct workflow.")}
+      <div class="quick-actions"><button class="card quick-action" data-action="counter-order"><div class="quick-action-icon">${icon("orders")}</div><div><h2>Counter order</h2><p>Customer is at the shop with garments.</p></div></button>
+      <button class="card quick-action" data-action="pickup-request"><div class="quick-action-icon">${icon("pickup")}</div><div><h2>Pickup request</h2><p>Log a WhatsApp or phone request.</p></div></button>
+      <button class="card quick-action" data-action="new-customer"><div class="quick-action-icon">${icon("user")}</div><div><h2>Add customer</h2><p>Create a customer before their first order.</p></div></button></div>`;
   }
 
   function deliveryStops(){
@@ -177,7 +221,7 @@
   }
 
   function historyView(){const done=state.data.orders.filter(o=>o.laundry_status==="delivered");return `${titleBlock("Completed","History",`${done.length} delivered orders assigned to you.`)}${done.length?`<div class="grid cards">${done.map(orderCard).join("")}</div>`:`<div class="empty">No completed deliveries yet.</div>`}`}
-  function accountView(){const a=state.data.actor; return `${titleBlock("Account","${esc(a.display_name)}",roleName(a.role))}<div class="card stack"><div><div class="kicker">Role</div><div class="strong">${roleName(a.role)}</div></div>${a.mobile?`<div><div class="kicker">Mobile</div><div class="strong">${esc(a.mobile)}</div></div>`:""}${a.customer_code?`<div><div class="kicker">Customer code</div><div class="mono strong">${esc(a.customer_code)}</div></div>`:""}<button class="btn danger" data-action="logout">Sign out</button></div>`}
+  function accountView(){const a=state.data.actor; return `${titleBlock("Account","${esc(a.display_name)}",roleName(a.role))}<div class="grid cards"><div class="card stack"><div><div class="kicker">Role</div><div class="strong">${roleName(a.role)}</div></div>${a.mobile?`<div><div class="kicker">Mobile</div><div class="strong">${esc(a.mobile)}</div></div>`:""}${a.customer_code?`<div><div class="kicker">Customer code</div><div class="mono strong">${esc(a.customer_code)}</div></div>`:""}</div><div class="card stack"><div><div class="kicker">Appearance</div><h3>Theme color</h3><p class="small muted">Choose a color that is comfortable for your team.</p></div><button class="btn" data-action="theme">${icon("palette","sm")}Change theme</button><button class="btn danger" data-action="logout">Sign out</button></div></div>`}
   function customerPickup(){return `${titleBlock("Doorstep","Request pickup","One request. Staff will assign the driver.")}<form id="pickupSelfForm" class="card stack"><label>Pickup address<textarea name="address" required>${esc(state.data.actor.address||"")}</textarea></label><label>Note <textarea name="note" placeholder="Building, flat, preferred time..."></textarea></label><button class="btn primary block">REQUEST PICKUP →</button></form>`}
 
   function reportsView(){
@@ -272,6 +316,15 @@
   function openCatalog(kind,item=null){const isG=kind==="garment";simpleModal(`${item?'Edit':'Add'} ${kind}`,`<div class="stack"><input type="hidden" name="id" value="${item?.id||''}"><label>Name<input class="input" name="name" value="${esc(item?.name||'')}" required></label><label>Code<input class="input mono" name="code" value="${esc(item?.code||'')}" required></label>${isG?'':`<label>Workflow<select name="workflow"><option value="wash_iron" ${item?.workflow==='wash_iron'?'selected':''}>Wash + Iron</option><option value="iron_only" ${item?.workflow==='iron_only'?'selected':''}>Iron Only</option></select></label>`}<label class="row"><input name="active" type="checkbox" ${item?.active===false?'':'checked'}> Active</label><button class="btn primary block">SAVE →</button></div>`,isG?"garmentForm":"serviceForm")}
   function openDiscount(item=null){simpleModal(item?"Edit discount":"Add discount",`<div class="stack"><input type="hidden" name="id" value="${item?.id||''}"><label>Name<input class="input" name="name" value="${esc(item?.name||'')}" required></label><label>Type<select name="discount_type"><option value="percent" ${item?.discount_type==='percent'?'selected':''}>Percent</option><option value="fixed" ${item?.discount_type==='fixed'?'selected':''}>Fixed AED</option></select></label><label>Value<input class="input" name="value" type="number" min="0" step="0.01" value="${item?.value??''}" required></label><label class="row"><input name="active" type="checkbox" ${item?.active===false?'':'checked'}> Active</label><button class="btn primary block">SAVE DISCOUNT →</button></div>`,"discountForm")}
 
+  function themeModal(){
+    return `<div class="modal-backdrop"><form class="modal" id="themeForm"><div class="modal-head"><div><div class="kicker">Appearance</div><h2>Theme color</h2></div><button type="button" class="x" data-action="close-modal">×</button></div>
+      <p class="sub">Choose one accent color. The rest of the interface stays light and consistent.</p>
+      <div class="section"><div class="theme-grid">${THEME_PRESETS.map(c=>`<button type="button" class="theme-swatch ${state.theme===c?'active':''}" style="background:${c}" data-theme-color="${c}" aria-label="Use ${c}"></button>`).join("")}</div></div>
+      <div class="section"><label>Custom color<div class="theme-custom"><input id="themeColor" name="color" type="color" value="${state.theme}"><input class="input mono" id="themeHex" value="${state.theme}" maxlength="7" aria-label="Theme hex color"></div></label></div>
+      <div class="section"><button class="btn primary block">Save theme</button></div>
+    </form></div>`;
+  }
+  function openTheme(){state.modal=themeModal();renderApp()}
   function closeModal(){state.modal=null;renderApp()}
   async function doAction(body, success="Saved"){
     try{setBusy(true);await api("/action",{method:"POST",body});state.modal=null;await refresh();toast(success)}catch(e){toast(e.message,true)}finally{setBusy(false)}
@@ -292,10 +345,20 @@
     bind("garmentForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_garment",id:f.get("id")||null,name:f.get("name"),code:f.get("code"),active:f.get("active")==="on"},"Garment saved")});
     bind("serviceForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_service",id:f.get("id")||null,name:f.get("name"),code:f.get("code"),workflow:f.get("workflow"),active:f.get("active")==="on"},"Service saved")});
     bind("discountForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_discount",id:f.get("id")||null,name:f.get("name"),discount_type:f.get("discount_type"),value:f.get("value"),active:f.get("active")==="on"},"Discount saved")});
+    bind("themeForm",e=>{e.preventDefault();const color=id("themeHex")?.value||id("themeColor")?.value; if(!/^#[0-9a-f]{6}$/i.test(color||""))return toast("Enter a valid color such as #2563EB",true);applyTheme(color,true);state.modal=null;renderApp();toast("Theme updated")});
+    const themeColor=id("themeColor"), themeHex=id("themeHex"); if(themeColor&&themeHex){themeColor.addEventListener("input",()=>themeHex.value=themeColor.value);themeHex.addEventListener("input",()=>{if(/^#[0-9a-f]{6}$/i.test(themeHex.value))themeColor.value=themeHex.value})}
     const service=id("itemService"); if(service) service.addEventListener("change",()=>{state.serviceId=service.value; id("itemPicker").innerHTML=itemPicker(state.serviceId,state.qty)});
   }
 
-  function printDoc(o,mode){
+  let qrLoader=null;
+  function ensureQRCode(){
+    if(window.QRCode) return Promise.resolve();
+    if(qrLoader) return qrLoader;
+    qrLoader=new Promise((resolve,reject)=>{const sc=document.createElement("script");sc.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";sc.onload=resolve;sc.onerror=()=>reject(new Error("Could not load QR generator"));document.head.appendChild(sc)});
+    return qrLoader;
+  }
+  async function printDoc(o,mode){
+    try{await ensureQRCode()}catch(e){return toast(e.message,true)}
     const p=document.getElementById("printArea");
     if(mode==="receipt"){
       p.innerHTML=`<div class="print-sheet"><div class="print-head"><div><div class="print-title">LAUNDRY DESK</div><div>${esc(o.order_no)}</div><div>${new Date(o.created_at).toLocaleString()}</div></div><div id="printQr" class="qr"></div></div><h3>${esc(o.customer.name)} · ${esc(o.customer.customer_code)}</h3><div>${esc(o.customer.mobile)}</div><table class="print-table"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${o.items.map(i=>`<tr><td>${esc(i.garment.name)} / ${esc(i.service.name)}</td><td>${i.quantity}</td><td>${fmt(i.unit_price)}</td><td>${fmt(i.line_total)}</td></tr>`).join("")}</tbody></table><div style="margin-top:6mm;text-align:right"><b>Total ${fmt(o.total)}</b><br>Paid ${fmt(o.paid)}<br><b>Outstanding ${fmt(o.outstanding)}</b>${o.customer_credit>0?`<br>Customer credit ${fmt(o.customer_credit)}`:""}</div><p style="margin-top:8mm">Laundry status: <b>${stageLabel(o.laundry_status)}</b> · Payment status: <b>${o.payment_status}</b></p></div>`;
@@ -311,12 +374,13 @@
 
   document.addEventListener("click",async e=>{
     const demoBtn=e.target.closest("[data-demo]"); if(demoBtn){const [u,p]=demoBtn.dataset.demo.split("|");id("loginIdentifier").value=u;id("loginPin").value=p;return}
+    const themeBtn=e.target.closest("[data-theme-color]"); if(themeBtn){applyTheme(themeBtn.dataset.themeColor,true);state.modal=themeModal();renderApp();return}
     const v=e.target.closest("[data-view]")?.dataset.view;if(v){state.view=v;renderApp();return}
     const q=e.target.closest("[data-qty]");if(q){const gid=q.dataset.qty,delta=Number(q.dataset.delta);state.qty[gid]=Math.max(0,Number(state.qty[gid]||0)+delta);const el=document.querySelector(`[data-qty-value="${gid}"]`);if(el)el.textContent=state.qty[gid];return}
     const tab=e.target.closest("[data-admin-tab]"); if(tab){document.querySelectorAll("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));const panel=id("adminPanel");panel.innerHTML=tab.dataset.adminTab==="staff"?adminStaff():tab.dataset.adminTab==="customers"?adminCustomers():tab.dataset.adminTab==="rates"?adminRates():tab.dataset.adminTab==="catalog"?adminCatalog():adminDiscounts();return}
     const stageFilter=e.target.closest("[data-filter-stage]");if(stageFilter){document.querySelectorAll("[data-filter-stage]").forEach(x=>x.classList.toggle("active",x===stageFilter));let os=state.data.orders;if(stageFilter.dataset.filterStage!=="all")os=os.filter(o=>o.laundry_status===stageFilter.dataset.filterStage);id("orderList").innerHTML=os.length?os.map(orderCard).join(""):`<div class="empty">No orders in this stage.</div>`;return}
     const b=e.target.closest("[data-action]");if(!b)return;const a=b.dataset.action;
-    if(a==="logout")return logout(); if(a==="close-modal")return closeModal();
+    if(a==="logout")return logout(); if(a==="theme")return openTheme(); if(a==="close-modal")return closeModal();
     if(a==="open-order")return openOrder(b.dataset.id); if(a==="counter-order")return openCounter(); if(a==="pickup-request")return openPickupRequest(); if(a==="new-customer")return openCustomer();
     if(a==="collect")return openCollect(b.dataset.id); if(a==="deliver")return openDeliver(b.dataset.id);
     if(a==="payment")return openPayment(state.data.orders.find(o=>o.id===b.dataset.id)); if(a==="assign")return openAssign(state.data.orders.find(o=>o.id===b.dataset.id),b.dataset.kind);
