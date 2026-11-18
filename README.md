@@ -72,3 +72,9 @@ Use the palette button in the top bar (or **Account → Theme color** for Delive
 - Long order/list content uses browser content visibility to reduce rendering work.
 - API calls have a 20-second timeout with a clear retry message.
 - Supabase is preconnected from the page head to reduce first-request latency.
+
+## UI configuration
+
+- Graphite theme is the default; Light is available from the header theme switch.
+- Admin can set organization name, billing address and phone under Setup → Business.
+- Organization details are stored in Supabase `laundry_settings` and used by header/printing.

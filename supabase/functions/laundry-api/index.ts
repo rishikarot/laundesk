@@ -511,6 +511,24 @@ async function actionHandler(actor, body) {
     return { id: r.data.id };
   }
 
+  if (action === "save_business_settings") {
+    requireRole(actor, ["admin"]);
+    const name = String(body.name || "").trim();
+    const address = String(body.address || "").trim();
+    const phone = String(body.phone || "").trim();
+    if (!name) throw new Error("Organization name is required");
+    if (!address) throw new Error("Organization address is required");
+    if (name.length > 120) throw new Error("Organization name is too long");
+    if (address.length > 500) throw new Error("Organization address is too long");
+    const existing = await db.from("laundry_settings").select("value").eq("key", "business").maybeSingle();
+    if (existing.error) throw existing.error;
+    const value = { ...(existing.data?.value || {}), name, address, phone, currency: existing.data?.value?.currency || "AED", timezone: existing.data?.value?.timezone || "Asia/Dubai" };
+    const r = await db.from("laundry_settings").upsert({ key: "business", value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (r.error) throw r.error;
+    await audit(actor, "business_settings_updated", "settings", "business", { name, address, phone });
+    return { business: value };
+  }
+
   throw new Error("Unknown action");
 }
 
@@ -520,7 +538,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && (path === "/" || path === "/health")) {
-      return json({ ok: true, service: "laundry-api", version: "1.0.0", time: new Date().toISOString() });
+      return json({ ok: true, service: "laundry-api", version: "1.1.0", time: new Date().toISOString() });
     }
 
     if (req.method === "POST" && path === "/login") {

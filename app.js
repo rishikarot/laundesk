@@ -12,7 +12,8 @@
     busy: false,
     qty: {},
     serviceId: null,
-    theme: localStorage.getItem("laundry_theme") || "#2563eb",
+    theme: localStorage.getItem("laundry_theme") || "#64748b",
+    mode: localStorage.getItem("laundry_mode") || "graphite",
   };
   const app = document.getElementById("app");
   const toastEl = document.getElementById("toast");
@@ -22,20 +23,21 @@
   const roleName = r => ({admin:"Admin",manager:"Manager",delivery:"Delivery",customer:"Customer"}[r] || r);
   const id = x => document.getElementById(x);
 
-  const THEME_PRESETS = ["#2563eb","#0f766e","#7c3aed","#d65a31","#111827"];
-  function mixWithWhite(hex, amount=.91){
-    const h=String(hex||"").replace("#",""); if(!/^[0-9a-f]{6}$/i.test(h)) return "#eaf1ff";
-    const rgb=[0,2,4].map(i=>parseInt(h.slice(i,i+2),16));
-    const mixed=rgb.map(v=>Math.round(v*(1-amount)+255*amount));
-    return "#"+mixed.map(v=>v.toString(16).padStart(2,"0")).join("");
-  }
+  const THEME_PRESETS = ["#64748b","#2563eb","#0f766e","#7c3aed","#b45309"];
   function applyTheme(color, persist=true){
-    if(!/^#[0-9a-f]{6}$/i.test(color||"")) color="#2563eb";
+    if(!/^#[0-9a-f]{6}$/i.test(color||"")) color="#64748b";
     state.theme=color.toLowerCase();
-    document.documentElement.style.setProperty("--accent",state.theme);
-    document.documentElement.style.setProperty("--accent-soft",mixWithWhite(state.theme));
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content",state.theme);
+    document.documentElement.style.setProperty("--brand-accent",state.theme);
     if(persist) localStorage.setItem("laundry_theme",state.theme);
+  }
+  function applyMode(mode, persist=true){
+    state.mode=mode==="light"?"light":"graphite";
+    document.documentElement.dataset.theme=state.mode;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content",state.mode==="graphite"?"#0d0f11":"#f6f7f8");
+    if(persist) localStorage.setItem("laundry_mode",state.mode);
+  }
+  function business(){
+    return state.data?.refs?.settings?.business || {name:"Laundry Desk",address:"",phone:"",currency:"AED"};
   }
   function icon(name, cls=""){
     const paths={
@@ -50,11 +52,15 @@
       pickup:'<path d="M3 7h11v10H3zM14 10h4l3 3v4h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
       admin:'<path d="M4 5h16v14H4zM8 9h8M8 13h5"/>',
       palette:'<path d="M12 3a9 9 0 0 0 0 18h1.2a1.8 1.8 0 0 0 1.4-2.9l-.4-.5a1.8 1.8 0 0 1 1.4-2.9H17a4 4 0 0 0 4-4A7.7 7.7 0 0 0 12 3z"/><circle cx="7.5" cy="10" r=".8"/><circle cx="10" cy="6.8" r=".8"/><circle cx="14" cy="6.8" r=".8"/>',
+      sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/>',
+      moon:'<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2z"/>',
+      building:'<path d="M4 21V5l8-3 8 3v16"/><path d="M8 8h2M14 8h2M8 12h2M14 12h2M8 16h2M14 16h2M2 21h20"/>',
       logout:'<path d="M10 17l5-5-5-5M15 12H3M14 3h7v18h-7"/>'
     };
     return `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${paths[name]||paths.home}</svg>`;
   }
   applyTheme(state.theme,false);
+  applyMode(state.mode,false);
 
   function toast(message, error=false){
     toastEl.textContent = message; toastEl.className = "toast show" + (error ? " error" : "");
@@ -90,7 +96,59 @@
     finally{if(show) setBusy(false)}
   }
 
-  function setBusy(v){state.busy=v; document.documentElement.classList.toggle("is-busy",v); document.body.style.cursor=v?"progress":"";}
+  const busyButtons = new Set();
+  function processingText(button, fallback="Processing…"){
+    const text=(button?.textContent||"").trim().toLowerCase();
+    if(text.includes("sign in")) return "Signing in…";
+    if(text.includes("sign out")||text==="exit") return "Signing out…";
+    if(text.includes("request pickup")) return "Requesting…";
+    if(text.includes("collect")) return "Collecting…";
+    if(text.includes("deliver")) return "Delivering…";
+    if(text.includes("payment")) return "Saving payment…";
+    if(text.includes("assign")) return "Assigning…";
+    if(text.includes("credit")) return "Applying credit…";
+    if(text.includes("reset")) return "Resetting…";
+    if(text.includes("disable")||text.includes("enable")) return "Updating…";
+    if(text.includes("create")) return "Creating…";
+    if(text.includes("save")) return "Saving…";
+    if(text.includes("receipt")||text.includes("pdf")) return "Preparing…";
+    if(text.includes("tag")||text.includes("label")) return "Preparing…";
+    return fallback;
+  }
+  function setButtonBusy(button, label){
+    if(!button || button.dataset.processing==="true") return;
+    const rect=button.getBoundingClientRect();
+    button.dataset.processing="true";
+    button.dataset.originalHtml=button.innerHTML;
+    button.dataset.originalMinWidth=button.style.minWidth||"";
+    if(rect.width) button.style.minWidth=`${Math.ceil(rect.width)}px`;
+    button.disabled=true;
+    button.classList.add("processing");
+    button.setAttribute("aria-busy","true");
+    button.innerHTML=`<span class="btn-spinner" aria-hidden="true"></span><span>${esc(label||processingText(button))}</span>`;
+    busyButtons.add(button);
+  }
+  function clearButtonBusy(button){
+    if(!button || button.dataset.processing!=="true") return;
+    button.innerHTML=button.dataset.originalHtml||button.innerHTML;
+    button.style.minWidth=button.dataset.originalMinWidth||"";
+    delete button.dataset.processing;
+    delete button.dataset.originalHtml;
+    delete button.dataset.originalMinWidth;
+    button.disabled=false;
+    button.classList.remove("processing");
+    button.removeAttribute("aria-busy");
+    busyButtons.delete(button);
+  }
+  function clearBusyButtons(){[...busyButtons].forEach(clearButtonBusy)}
+  function setBusy(v, trigger=null, label=null){
+    state.busy=v;
+    document.documentElement.classList.toggle("is-busy",v);
+    document.body.style.cursor=v?"progress":"";
+    document.body.setAttribute("aria-busy",v?"true":"false");
+    if(v && trigger) setButtonBusy(trigger,label);
+    if(!v) clearBusyButtons();
+  }
   function validViews(role){
     if(role==="admin") return ["home","orders","admin","reports"];
     if(role==="manager") return ["home","orders","new","reports"];
@@ -131,23 +189,27 @@
   async function login(e){
     e.preventDefault();
     const identifier=id("loginIdentifier").value.trim(), pin=id("loginPin").value.trim();
-    try{setBusy(true); const r=await api("/login",{method:"POST",body:{identifier,pin},auth:false}); state.token=r.token; localStorage.setItem("laundry_token",state.token); state.view=r.actor.role==="delivery"?"stops":"home"; await refresh(); toast(`Welcome, ${r.actor.display_name}`)}
+    try{setBusy(true,e.submitter,"Signing in…"); const r=await api("/login",{method:"POST",body:{identifier,pin},auth:false}); state.token=r.token; localStorage.setItem("laundry_token",state.token); state.view=r.actor.role==="delivery"?"stops":"home"; await refresh(); toast(`Welcome, ${r.actor.display_name}`)}
     catch(err){toast(err.message,true)} finally{setBusy(false)}
   }
 
-  async function logout(call=true){
-    if(call && state.token){try{await api("/logout",{method:"POST",body:{}})}catch{}}
+  async function logout(call=true, trigger=null){
+    if(call && state.token){
+      try{setBusy(true,trigger,"Signing out…");await api("/logout",{method:"POST",body:{}})}catch{}finally{setBusy(false)}
+    }
     state.token=""; state.data=null; localStorage.removeItem("laundry_token"); renderLogin();
   }
 
   function renderApp(){
     const d=state.data, a=d.actor, nav=navItems(a.role);
     const navButtons=nav.map(([v,l,i])=>`<button class="navbtn ${state.view===v?'active':''}" data-view="${v}">${icon(i)}<span>${l}</span></button>`).join("");
+    const org=business();
+    const orgInitial=(org.name||"Laundry Desk").trim().charAt(0).toUpperCase()||"L";
     app.innerHTML=`<div class="shell">
       <header class="topbar"><div class="topbar-inner">
-        <div class="brand"><div class="brand-mark">L</div><div>Laundry <span>Desk</span></div></div>
+        <div class="brand"><div class="brand-mark">${esc(orgInitial)}</div><div class="brand-copy"><div>${esc(org.name||"Laundry Desk")}</div>${org.address?`<span>${esc(org.address)}</span>`:""}</div></div>
         <nav class="desktop-nav">${navButtons}</nav>
-        <div class="actor"><div class="actor-copy"><div class="actor-name">${esc(a.display_name)}</div><div class="actor-role">${roleName(a.role)}</div></div><button class="icon-btn" data-action="theme" aria-label="Theme">${icon("palette")}</button><button class="btn ghost smallbtn" data-action="logout">${icon("logout","sm")}<span>Exit</span></button></div>
+        <div class="actor"><div class="actor-copy"><div class="actor-name">${esc(a.display_name)}</div><div class="actor-role">${roleName(a.role)}</div></div><button class="icon-btn" data-action="toggle-theme" aria-label="Switch to ${state.mode==='graphite'?'light':'graphite'} theme" title="Switch theme">${icon(state.mode==='graphite'?"sun":"moon")}</button><button class="icon-btn" data-action="theme" aria-label="Theme settings" title="Theme settings">${icon("palette")}</button><button class="btn ghost smallbtn" data-action="logout">${icon("logout","sm")}<span>Exit</span></button></div>
       </div></header>
       <main class="main">${renderView()}</main>
       <nav class="bottomnav"><div class="bottomnav-inner" style="--nav-count:${nav.length}">${navButtons}</div></nav>
@@ -221,7 +283,7 @@
   }
 
   function historyView(){const done=state.data.orders.filter(o=>o.laundry_status==="delivered");return `${titleBlock("Completed","History",`${done.length} delivered orders assigned to you.`)}${done.length?`<div class="grid cards">${done.map(orderCard).join("")}</div>`:`<div class="empty">No completed deliveries yet.</div>`}`}
-  function accountView(){const a=state.data.actor; return `${titleBlock("Account","${esc(a.display_name)}",roleName(a.role))}<div class="grid cards"><div class="card stack"><div><div class="kicker">Role</div><div class="strong">${roleName(a.role)}</div></div>${a.mobile?`<div><div class="kicker">Mobile</div><div class="strong">${esc(a.mobile)}</div></div>`:""}${a.customer_code?`<div><div class="kicker">Customer code</div><div class="mono strong">${esc(a.customer_code)}</div></div>`:""}</div><div class="card stack"><div><div class="kicker">Appearance</div><h3>Theme color</h3><p class="small muted">Choose a color that is comfortable for your team.</p></div><button class="btn" data-action="theme">${icon("palette","sm")}Change theme</button><button class="btn danger" data-action="logout">Sign out</button></div></div>`}
+  function accountView(){const a=state.data.actor; return `${titleBlock("Account","${esc(a.display_name)}",roleName(a.role))}<div class="grid cards"><div class="card stack"><div><div class="kicker">Role</div><div class="strong">${roleName(a.role)}</div></div>${a.mobile?`<div><div class="kicker">Mobile</div><div class="strong">${esc(a.mobile)}</div></div>`:""}${a.customer_code?`<div><div class="kicker">Customer code</div><div class="mono strong">${esc(a.customer_code)}</div></div>`:""}</div><div class="card stack"><div><div class="kicker">Appearance</div><h3>Theme</h3><p class="small muted">Switch Graphite / Light and optionally adjust the accent.</p></div><button class="btn" data-action="theme">${icon("palette","sm")}Change theme</button><button class="btn danger" data-action="logout">Sign out</button></div></div>`}
   function customerPickup(){return `${titleBlock("Doorstep","Request pickup","One request. Staff will assign the driver.")}<form id="pickupSelfForm" class="card stack"><label>Pickup address<textarea name="address" required>${esc(state.data.actor.address||"")}</textarea></label><label>Note <textarea name="note" placeholder="Building, flat, preferred time..."></textarea></label><button class="btn primary block">REQUEST PICKUP →</button></form>`}
 
   function reportsView(){
@@ -234,10 +296,11 @@
 
   function adminView(){
     const d=state.data;
-    return `${titleBlock("Control room","Admin","Accounts, access, garments, services, rates and discounts.")}
-      <div class="tabs"><button class="tab active" data-admin-tab="staff">Staff</button><button class="tab" data-admin-tab="customers">Customers</button><button class="tab" data-admin-tab="rates">Rates</button><button class="tab" data-admin-tab="catalog">Catalog</button><button class="tab" data-admin-tab="discounts">Discounts</button></div>
-      <div id="adminPanel">${adminStaff()}</div>`;
+    return `${titleBlock("Control room","Admin","Organization, accounts, access, catalog, rates and discounts.")}
+      <div class="tabs"><button class="tab active" data-admin-tab="business">Business</button><button class="tab" data-admin-tab="staff">Staff</button><button class="tab" data-admin-tab="customers">Customers</button><button class="tab" data-admin-tab="rates">Rates</button><button class="tab" data-admin-tab="catalog">Catalog</button><button class="tab" data-admin-tab="discounts">Discounts</button></div>
+      <div id="adminPanel">${adminBusiness()}</div>`;
   }
+  function adminBusiness(){const b=business();return `<div class="grid cards"><form id="businessForm" class="card stack"><div><div class="kicker">Organization</div><h2>Business identity</h2><p class="small muted">Used in the app header, receipts and printable labels.</p></div><label>Organization name<input class="input" name="name" value="${esc(b.name||'')}" required maxlength="120"></label><label>Address<textarea name="address" required placeholder="Building, street, area, Dubai, UAE">${esc(b.address||'')}</textarea></label><label>Phone <span class="muted">optional</span><input class="input" name="phone" value="${esc(b.phone||'')}" placeholder="+971..."></label><button class="btn primary">SAVE ORGANIZATION →</button></form><div class="card stack"><div><div class="kicker">Preview</div><h2>${esc(b.name||'Laundry Desk')}</h2><p class="sub">${esc(b.address||'Add the billing address')}</p>${b.phone?`<p class="small">${esc(b.phone)}</p>`:''}</div><div class="business-preview-mark">${esc((b.name||'L').trim().charAt(0).toUpperCase())}</div><p class="small muted">Changes are shared across all staff and customers after their next refresh.</p></div></div>`}
   function adminStaff(){return `<div class="row between"><h2>Staff</h2><button class="btn primary" data-action="new-staff">+ Staff</button></div><div class="list">${state.data.staff.map(s=>`<div class="list-row"><div class="row between"><div><b>${esc(s.display_name)}</b><div class="small mono muted">${esc(s.login_id)} · ${s.role}</div></div><span class="badge ${s.active?'paid':'unpaid'}">${s.active?'active':'disabled'}</span></div><button class="btn smallbtn" data-action="edit-staff" data-id="${s.id}">Edit</button></div>`).join("")}</div>`}
   function adminCustomers(){return `<div class="row between"><h2>Customers</h2><button class="btn primary" data-action="new-customer">+ Customer</button></div><div class="list">${state.data.customers.map(c=>`<div class="list-row"><div class="row between"><div><b>${esc(c.name)}</b><div class="small mono muted">${esc(c.customer_code)} · ${esc(c.mobile)}</div></div><span class="badge ${c.access_enabled?'paid':'unpaid'}">${c.access_enabled?'access on':'access off'}</span></div><div class="row"><button class="btn smallbtn" data-action="toggle-customer" data-id="${c.id}" data-enabled="${c.access_enabled}">${c.access_enabled?'Disable':'Enable'} access</button><button class="btn smallbtn" data-action="reset-customer" data-id="${c.id}">Reset 6-digit code</button></div></div>`).join("")}</div>`}
   function adminRates(){const g=new Map(state.data.refs.garments.map(x=>[x.id,x.name])),s=new Map(state.data.refs.services.map(x=>[x.id,x.name]));return `<div class="row between"><h2>Rates</h2><button class="btn primary" data-action="new-rate">+ Rate</button></div><div class="table-wrap"><table><thead><tr><th>Garment</th><th>Service</th><th>AED</th><th>From</th></tr></thead><tbody>${state.data.refs.rates.filter(r=>r.active).map(r=>`<tr><td>${esc(g.get(r.garment_type_id)||"")}</td><td>${esc(s.get(r.service_id)||"")}</td><td class="money">${Number(r.unit_price).toFixed(2)}</td><td>${r.effective_from}</td></tr>`).join("")}</tbody></table></div>`}
@@ -317,35 +380,37 @@
   function openDiscount(item=null){simpleModal(item?"Edit discount":"Add discount",`<div class="stack"><input type="hidden" name="id" value="${item?.id||''}"><label>Name<input class="input" name="name" value="${esc(item?.name||'')}" required></label><label>Type<select name="discount_type"><option value="percent" ${item?.discount_type==='percent'?'selected':''}>Percent</option><option value="fixed" ${item?.discount_type==='fixed'?'selected':''}>Fixed AED</option></select></label><label>Value<input class="input" name="value" type="number" min="0" step="0.01" value="${item?.value??''}" required></label><label class="row"><input name="active" type="checkbox" ${item?.active===false?'':'checked'}> Active</label><button class="btn primary block">SAVE DISCOUNT →</button></div>`,"discountForm")}
 
   function themeModal(){
-    return `<div class="modal-backdrop"><form class="modal" id="themeForm"><div class="modal-head"><div><div class="kicker">Appearance</div><h2>Theme color</h2></div><button type="button" class="x" data-action="close-modal">×</button></div>
-      <p class="sub">Choose one accent color. The rest of the interface stays light and consistent.</p>
-      <div class="section"><div class="theme-grid">${THEME_PRESETS.map(c=>`<button type="button" class="theme-swatch ${state.theme===c?'active':''}" style="background:${c}" data-theme-color="${c}" aria-label="Use ${c}"></button>`).join("")}</div></div>
-      <div class="section"><label>Custom color<div class="theme-custom"><input id="themeColor" name="color" type="color" value="${state.theme}"><input class="input mono" id="themeHex" value="${state.theme}" maxlength="7" aria-label="Theme hex color"></div></label></div>
+    return `<div class="modal-backdrop"><form class="modal" id="themeForm"><div class="modal-head"><div><div class="kicker">Appearance</div><h2>Theme</h2></div><button type="button" class="x" data-action="close-modal">×</button></div>
+      <p class="sub">Graphite is the default. Switch to Light when you prefer a brighter workspace.</p>
+      <div class="section theme-mode-grid"><button type="button" class="theme-mode ${state.mode==='graphite'?'active':''}" data-theme-mode="graphite"><span class="theme-preview graphite"></span><b>Graphite</b><small>Black + grey</small></button><button type="button" class="theme-mode ${state.mode==='light'?'active':''}" data-theme-mode="light"><span class="theme-preview light"></span><b>Light</b><small>White + soft grey</small></button></div>
+      <div class="section"><div class="kicker">Accent</div><p class="small muted">Used mainly in Light mode and focus states.</p><div class="theme-grid">${THEME_PRESETS.map(c=>`<button type="button" class="theme-swatch ${state.theme===c?'active':''}" style="background:${c}" data-theme-color="${c}" aria-label="Use ${c}"></button>`).join("")}</div></div>
+      <div class="section"><label>Custom accent<div class="theme-custom"><input id="themeColor" name="color" type="color" value="${state.theme}"><input class="input mono" id="themeHex" value="${state.theme}" maxlength="7" aria-label="Theme hex color"></div></label></div>
       <div class="section"><button class="btn primary block">Save theme</button></div>
     </form></div>`;
   }
   function openTheme(){state.modal=themeModal();renderApp()}
   function closeModal(){state.modal=null;renderApp()}
-  async function doAction(body, success="Saved"){
-    try{setBusy(true);await api("/action",{method:"POST",body});state.modal=null;await refresh();toast(success)}catch(e){toast(e.message,true)}finally{setBusy(false)}
+  async function doAction(body, success="Saved", trigger=null, label=null){
+    try{setBusy(true,trigger,label);await api("/action",{method:"POST",body});state.modal=null;await refresh();toast(success)}catch(e){toast(e.message,true)}finally{setBusy(false)}
   }
 
   function bindDynamicForms(){
     const bind=(formId,fn)=>{const f=id(formId);if(f)f.addEventListener("submit",fn)};
-    bind("pickupSelfForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"create_pickup_request",address:f.get("address"),note:f.get("note")},"Pickup requested")});
-    bind("pickupStaffForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"create_pickup_request",customer_id:f.get("customer_id"),pickup_driver_id:f.get("pickup_driver_id")||null,note:f.get("note")},"Pickup request saved")});
-    bind("counterForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems(id("itemService").value);if(!items.length)return toast("Add at least one garment",true);doAction({action:"create_counter_order",customer_id:f.get("customer_id"),discount_id:f.get("discount_id")||null,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Counter order created")});
-    bind("collectForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems(id("itemService").value);if(!items.length)return toast("Add at least one garment",true);doAction({action:"collect_pickup",order_id:e.target.dataset.order,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Pickup collected")});
-    bind("deliverForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"deliver_order",order_id:e.target.dataset.order,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Delivered")});
-    bind("paymentForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"record_payment",order_id:f.get("order_id"),amount:f.get("amount"),method:f.get("method"),context:f.get("context")},"Payment recorded")});
-    bind("assignForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"assign_driver",order_id:f.get("order_id"),kind:f.get("kind"),driver_id:f.get("driver_id")},"Driver assigned")});
-    bind("customerForm",async e=>{e.preventDefault();const f=new FormData(e.target);try{setBusy(true);const r=await api("/action",{method:"POST",body:{action:"save_customer",name:f.get("name"),mobile:f.get("mobile"),address:f.get("address"),pin:f.get("pin")||null}});state.modal=null;await refresh();if(r.temporary_pin)alert(`Customer created. Six-digit login code: ${r.temporary_pin}\nShare it privately with the customer.`);else toast("Customer saved")}catch(err){toast(err.message,true)}finally{setBusy(false)}});
-    bind("staffForm",async e=>{e.preventDefault();const f=new FormData(e.target),isNew=!f.get("id");try{setBusy(true);const r=await api("/action",{method:"POST",body:{action:"save_staff",id:f.get("id")||null,display_name:f.get("display_name"),login_id:f.get("login_id"),role:f.get("role"),phone:f.get("phone"),pin:f.get("pin")||null,active:f.get("active")==="on"}});state.modal=null;await refresh();if(isNew&&r.temporary_pin)alert(`Staff created. Six-digit login code: ${r.temporary_pin}\nShare it privately with the staff member.`);else toast("Staff saved")}catch(err){toast(err.message,true)}finally{setBusy(false)}});
-    bind("rateForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_rate",garment_type_id:f.get("garment_type_id"),service_id:f.get("service_id"),unit_price:f.get("unit_price"),effective_from:f.get("effective_from")},"Rate saved")});
-    bind("garmentForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_garment",id:f.get("id")||null,name:f.get("name"),code:f.get("code"),active:f.get("active")==="on"},"Garment saved")});
-    bind("serviceForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_service",id:f.get("id")||null,name:f.get("name"),code:f.get("code"),workflow:f.get("workflow"),active:f.get("active")==="on"},"Service saved")});
-    bind("discountForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_discount",id:f.get("id")||null,name:f.get("name"),discount_type:f.get("discount_type"),value:f.get("value"),active:f.get("active")==="on"},"Discount saved")});
-    bind("themeForm",e=>{e.preventDefault();const color=id("themeHex")?.value||id("themeColor")?.value; if(!/^#[0-9a-f]{6}$/i.test(color||""))return toast("Enter a valid color such as #2563EB",true);applyTheme(color,true);state.modal=null;renderApp();toast("Theme updated")});
+    bind("pickupSelfForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"create_pickup_request",address:f.get("address"),note:f.get("note")},"Pickup requested",e.submitter)});
+    bind("pickupStaffForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"create_pickup_request",customer_id:f.get("customer_id"),pickup_driver_id:f.get("pickup_driver_id")||null,note:f.get("note")},"Pickup request saved",e.submitter)});
+    bind("counterForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems(id("itemService").value);if(!items.length)return toast("Add at least one garment",true);doAction({action:"create_counter_order",customer_id:f.get("customer_id"),discount_id:f.get("discount_id")||null,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Counter order created",e.submitter)});
+    bind("collectForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems(id("itemService").value);if(!items.length)return toast("Add at least one garment",true);doAction({action:"collect_pickup",order_id:e.target.dataset.order,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Pickup collected",e.submitter)});
+    bind("deliverForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"deliver_order",order_id:e.target.dataset.order,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Delivered",e.submitter)});
+    bind("paymentForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"record_payment",order_id:f.get("order_id"),amount:f.get("amount"),method:f.get("method"),context:f.get("context")},"Payment recorded",e.submitter)});
+    bind("assignForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"assign_driver",order_id:f.get("order_id"),kind:f.get("kind"),driver_id:f.get("driver_id")},"Driver assigned",e.submitter)});
+    bind("customerForm",async e=>{e.preventDefault();const f=new FormData(e.target);try{setBusy(true,e.submitter,"Saving customer…");const r=await api("/action",{method:"POST",body:{action:"save_customer",name:f.get("name"),mobile:f.get("mobile"),address:f.get("address"),pin:f.get("pin")||null}});state.modal=null;await refresh();if(r.temporary_pin)alert(`Customer created. Six-digit login code: ${r.temporary_pin}\nShare it privately with the customer.`);else toast("Customer saved")}catch(err){toast(err.message,true)}finally{setBusy(false)}});
+    bind("staffForm",async e=>{e.preventDefault();const f=new FormData(e.target),isNew=!f.get("id");try{setBusy(true,e.submitter,"Saving staff…");const r=await api("/action",{method:"POST",body:{action:"save_staff",id:f.get("id")||null,display_name:f.get("display_name"),login_id:f.get("login_id"),role:f.get("role"),phone:f.get("phone"),pin:f.get("pin")||null,active:f.get("active")==="on"}});state.modal=null;await refresh();if(isNew&&r.temporary_pin)alert(`Staff created. Six-digit login code: ${r.temporary_pin}\nShare it privately with the staff member.`);else toast("Staff saved")}catch(err){toast(err.message,true)}finally{setBusy(false)}});
+    bind("rateForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_rate",garment_type_id:f.get("garment_type_id"),service_id:f.get("service_id"),unit_price:f.get("unit_price"),effective_from:f.get("effective_from")},"Rate saved",e.submitter)});
+    bind("garmentForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_garment",id:f.get("id")||null,name:f.get("name"),code:f.get("code"),active:f.get("active")==="on"},"Garment saved",e.submitter)});
+    bind("serviceForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_service",id:f.get("id")||null,name:f.get("name"),code:f.get("code"),workflow:f.get("workflow"),active:f.get("active")==="on"},"Service saved",e.submitter)});
+    bind("discountForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_discount",id:f.get("id")||null,name:f.get("name"),discount_type:f.get("discount_type"),value:f.get("value"),active:f.get("active")==="on"},"Discount saved",e.submitter)});
+    bind("businessForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_business_settings",name:f.get("name"),address:f.get("address"),phone:f.get("phone")},"Organization updated",e.submitter,"Saving organization…")});
+    bind("themeForm",e=>{e.preventDefault();const color=id("themeHex")?.value||id("themeColor")?.value; if(!/^#[0-9a-f]{6}$/i.test(color||""))return toast("Enter a valid color such as #64748B",true);applyTheme(color,true);applyMode(state.mode,true);state.modal=null;renderApp();toast("Theme updated")});
     const themeColor=id("themeColor"), themeHex=id("themeHex"); if(themeColor&&themeHex){themeColor.addEventListener("input",()=>themeHex.value=themeColor.value);themeHex.addEventListener("input",()=>{if(/^#[0-9a-f]{6}$/i.test(themeHex.value))themeColor.value=themeHex.value})}
     const service=id("itemService"); if(service) service.addEventListener("change",()=>{state.serviceId=service.value; id("itemPicker").innerHTML=itemPicker(state.serviceId,state.qty)});
   }
@@ -357,39 +422,40 @@
     qrLoader=new Promise((resolve,reject)=>{const sc=document.createElement("script");sc.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";sc.onload=resolve;sc.onerror=()=>reject(new Error("Could not load QR generator"));document.head.appendChild(sc)});
     return qrLoader;
   }
-  async function printDoc(o,mode){
-    try{await ensureQRCode()}catch(e){return toast(e.message,true)}
-    const p=document.getElementById("printArea");
+  async function printDoc(o,mode,trigger=null){
+    try{setBusy(true,trigger,mode==="receipt"?"Preparing receipt…":"Preparing labels…");await ensureQRCode()}catch(e){setBusy(false);return toast(e.message,true)}
+    const p=document.getElementById("printArea"), org=business();
     if(mode==="receipt"){
-      p.innerHTML=`<div class="print-sheet"><div class="print-head"><div><div class="print-title">LAUNDRY DESK</div><div>${esc(o.order_no)}</div><div>${new Date(o.created_at).toLocaleString()}</div></div><div id="printQr" class="qr"></div></div><h3>${esc(o.customer.name)} · ${esc(o.customer.customer_code)}</h3><div>${esc(o.customer.mobile)}</div><table class="print-table"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${o.items.map(i=>`<tr><td>${esc(i.garment.name)} / ${esc(i.service.name)}</td><td>${i.quantity}</td><td>${fmt(i.unit_price)}</td><td>${fmt(i.line_total)}</td></tr>`).join("")}</tbody></table><div style="margin-top:6mm;text-align:right"><b>Total ${fmt(o.total)}</b><br>Paid ${fmt(o.paid)}<br><b>Outstanding ${fmt(o.outstanding)}</b>${o.customer_credit>0?`<br>Customer credit ${fmt(o.customer_credit)}`:""}</div><p style="margin-top:8mm">Laundry status: <b>${stageLabel(o.laundry_status)}</b> · Payment status: <b>${o.payment_status}</b></p></div>`;
+      p.innerHTML=`<div class="print-sheet"><div class="print-head"><div><div class="print-title">${esc(org.name||"Laundry Desk")}</div>${org.address?`<div class="print-address">${esc(org.address)}</div>`:""}${org.phone?`<div>${esc(org.phone)}</div>`:""}<div class="print-order">${esc(o.order_no)} · ${new Date(o.created_at).toLocaleString()}</div></div><div id="printQr" class="qr"></div></div><h3>${esc(o.customer.name)} · ${esc(o.customer.customer_code)}</h3><div>${esc(o.customer.mobile)}</div><table class="print-table"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${o.items.map(i=>`<tr><td>${esc(i.garment.name)} / ${esc(i.service.name)}</td><td>${i.quantity}</td><td>${fmt(i.unit_price)}</td><td>${fmt(i.line_total)}</td></tr>`).join("")}</tbody></table><div style="margin-top:6mm;text-align:right"><b>Total ${fmt(o.total)}</b><br>Paid ${fmt(o.paid)}<br><b>Outstanding ${fmt(o.outstanding)}</b>${o.customer_credit>0?`<br>Customer credit ${fmt(o.customer_credit)}`:""}</div><p style="margin-top:8mm">Laundry status: <b>${stageLabel(o.laundry_status)}</b> · Payment status: <b>${o.payment_status}</b></p></div>`;
       if(window.QRCode)new QRCode(document.getElementById("printQr"),{text:o.order_no,width:90,height:90});
     }else{
-      p.innerHTML=`<div class="print-sheet"><div class="bag-label"><div class="row between"><div><div class="print-title">${esc(o.order_no)}</div><b>${esc(o.customer.name)}</b><br>${esc(o.customer.customer_code)} · ${o.pieces.length} pcs</div><div id="printQr" class="qr"></div></div></div><div class="label-grid">${o.pieces.map(pc=>`<div class="garment-tag"><b>${esc(o.order_no)}</b><br>Customer: ${esc(o.customer.customer_code)}<br>Piece: <b>${pc.piece_no}/${o.pieces.length}</b><br><span class="mono">${esc(pc.tag_code)}</span></div>`).join("")}</div></div>`;
+      p.innerHTML=`<div class="print-sheet"><div class="bag-label"><div class="row between"><div><div class="print-org">${esc(org.name||"Laundry Desk")}</div><div class="print-title">${esc(o.order_no)}</div><b>${esc(o.customer.name)}</b><br>${esc(o.customer.customer_code)} · ${o.pieces.length} pcs</div><div id="printQr" class="qr"></div></div></div><div class="label-grid">${o.pieces.map(pc=>`<div class="garment-tag"><span class="print-org">${esc(org.name||"Laundry Desk")}</span><br><b>${esc(o.order_no)}</b><br>Customer: ${esc(o.customer.customer_code)}<br>Piece: <b>${pc.piece_no}/${o.pieces.length}</b><br><span class="mono">${esc(pc.tag_code)}</span></div>`).join("")}</div></div>`;
       if(window.QRCode)new QRCode(document.getElementById("printQr"),{text:o.order_no,width:90,height:90});
     }
-    setTimeout(()=>window.print(),100);
+    setTimeout(()=>{window.print();setBusy(false)},120);
   }
 
-  function whatsapp(o){const phone=(o.customer.mobile||"").replace(/\D/g,"");const msg=`Laundry Desk — ${o.order_no}\nStatus: ${stageLabel(o.laundry_status)}\nTotal: ${fmt(o.total)}\nPaid: ${fmt(o.paid)}\nBalance: ${fmt(o.outstanding)}\n\nReceipt PDF can be attached to this chat.`;window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,"_blank")}
+  function whatsapp(o){const phone=(o.customer.mobile||"").replace(/\D/g,""),org=business();const msg=`${org.name||"Laundry Desk"} — ${o.order_no}\nStatus: ${stageLabel(o.laundry_status)}\nTotal: ${fmt(o.total)}\nPaid: ${fmt(o.paid)}\nBalance: ${fmt(o.outstanding)}\n\nReceipt PDF can be attached to this chat.`;window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,"_blank")}
 
   document.addEventListener("click",async e=>{
     const demoBtn=e.target.closest("[data-demo]"); if(demoBtn){const [u,p]=demoBtn.dataset.demo.split("|");id("loginIdentifier").value=u;id("loginPin").value=p;return}
     const themeBtn=e.target.closest("[data-theme-color]"); if(themeBtn){applyTheme(themeBtn.dataset.themeColor,true);state.modal=themeModal();renderApp();return}
+    const modeBtn=e.target.closest("[data-theme-mode]"); if(modeBtn){applyMode(modeBtn.dataset.themeMode,true);state.modal=themeModal();renderApp();return}
     const v=e.target.closest("[data-view]")?.dataset.view;if(v){state.view=v;renderApp();return}
     const q=e.target.closest("[data-qty]");if(q){const gid=q.dataset.qty,delta=Number(q.dataset.delta);state.qty[gid]=Math.max(0,Number(state.qty[gid]||0)+delta);const el=document.querySelector(`[data-qty-value="${gid}"]`);if(el)el.textContent=state.qty[gid];return}
-    const tab=e.target.closest("[data-admin-tab]"); if(tab){document.querySelectorAll("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));const panel=id("adminPanel");panel.innerHTML=tab.dataset.adminTab==="staff"?adminStaff():tab.dataset.adminTab==="customers"?adminCustomers():tab.dataset.adminTab==="rates"?adminRates():tab.dataset.adminTab==="catalog"?adminCatalog():adminDiscounts();return}
+    const tab=e.target.closest("[data-admin-tab]"); if(tab){document.querySelectorAll("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));const panel=id("adminPanel");panel.innerHTML=tab.dataset.adminTab==="business"?adminBusiness():tab.dataset.adminTab==="staff"?adminStaff():tab.dataset.adminTab==="customers"?adminCustomers():tab.dataset.adminTab==="rates"?adminRates():tab.dataset.adminTab==="catalog"?adminCatalog():adminDiscounts();bindDynamicForms();return}
     const stageFilter=e.target.closest("[data-filter-stage]");if(stageFilter){document.querySelectorAll("[data-filter-stage]").forEach(x=>x.classList.toggle("active",x===stageFilter));let os=state.data.orders;if(stageFilter.dataset.filterStage!=="all")os=os.filter(o=>o.laundry_status===stageFilter.dataset.filterStage);id("orderList").innerHTML=os.length?os.map(orderCard).join(""):`<div class="empty">No orders in this stage.</div>`;return}
     const b=e.target.closest("[data-action]");if(!b)return;const a=b.dataset.action;
-    if(a==="logout")return logout(); if(a==="theme")return openTheme(); if(a==="close-modal")return closeModal();
+    if(a==="logout")return logout(true,b); if(a==="toggle-theme"){applyMode(state.mode==="graphite"?"light":"graphite",true);renderApp();return} if(a==="theme")return openTheme(); if(a==="close-modal")return closeModal();
     if(a==="open-order")return openOrder(b.dataset.id); if(a==="counter-order")return openCounter(); if(a==="pickup-request")return openPickupRequest(); if(a==="new-customer")return openCustomer();
     if(a==="collect")return openCollect(b.dataset.id); if(a==="deliver")return openDeliver(b.dataset.id);
     if(a==="payment")return openPayment(state.data.orders.find(o=>o.id===b.dataset.id)); if(a==="assign")return openAssign(state.data.orders.find(o=>o.id===b.dataset.id),b.dataset.kind);
-    if(a==="advance")return doAction({action:"advance_order",order_id:b.dataset.id,target_status:b.dataset.status},`Moved to ${stageLabel(b.dataset.status)}`);
-    if(a==="credit")return doAction({action:"apply_credit",order_id:b.dataset.id},"Customer credit applied");
-    if(a==="print-receipt")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"receipt"); if(a==="print-labels")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"labels"); if(a==="whatsapp")return whatsapp(state.data.orders.find(o=>o.id===b.dataset.id));
+    if(a==="advance")return doAction({action:"advance_order",order_id:b.dataset.id,target_status:b.dataset.status},`Moved to ${stageLabel(b.dataset.status)}`,b,"Updating stage…");
+    if(a==="credit")return doAction({action:"apply_credit",order_id:b.dataset.id},"Customer credit applied",b,"Applying credit…");
+    if(a==="print-receipt")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"receipt",b); if(a==="print-labels")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"labels",b); if(a==="whatsapp")return whatsapp(state.data.orders.find(o=>o.id===b.dataset.id));
     if(a==="new-staff")return openStaff(); if(a==="edit-staff")return openStaff(state.data.staff.find(s=>s.id===b.dataset.id)); if(a==="new-rate")return openRate(); if(a==="new-garment")return openCatalog("garment"); if(a==="edit-garment")return openCatalog("garment",state.data.refs.garments.find(x=>x.id===b.dataset.id)); if(a==="new-service")return openCatalog("service"); if(a==="edit-service")return openCatalog("service",state.data.refs.services.find(x=>x.id===b.dataset.id)); if(a==="new-discount")return openDiscount(); if(a==="edit-discount")return openDiscount(state.data.refs.discounts.find(x=>x.id===b.dataset.id));
-    if(a==="toggle-customer")return doAction({action:"set_customer_access",customer_id:b.dataset.id,enabled:b.dataset.enabled!=="true"},"Customer access updated");
-    if(a==="reset-customer"){if(!confirm("Reset this customer's six-digit login code?"))return;try{setBusy(true);const r=await api("/action",{method:"POST",body:{action:"reset_customer_pin",customer_id:b.dataset.id}});await refresh();alert(`New customer code: ${r.pin}\nShare it privately with the customer.`)}catch(err){toast(err.message,true)}finally{setBusy(false)}return}
+    if(a==="toggle-customer")return doAction({action:"set_customer_access",customer_id:b.dataset.id,enabled:b.dataset.enabled!=="true"},"Customer access updated",b,"Updating access…");
+    if(a==="reset-customer"){if(!confirm("Reset this customer's six-digit login code?"))return;try{setBusy(true,b,"Resetting code…");const r=await api("/action",{method:"POST",body:{action:"reset_customer_pin",customer_id:b.dataset.id}});await refresh();alert(`New customer code: ${r.pin}\nShare it privately with the customer.`)}catch(err){toast(err.message,true)}finally{setBusy(false)}return}
   });
 
   window.addEventListener("online",()=>{if(state.token)refresh()});

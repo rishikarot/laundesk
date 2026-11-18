@@ -142,3 +142,9 @@ Do not create duplicate payments to “fix” a screen value. Refresh first. If 
 3. Choose one of the preset colors, or select a custom color.
 4. Tap **Save theme**.
 5. The choice is remembered on that device/browser. It only changes appearance; orders, payments and workflow data are unaffected.
+
+## Organization and theme
+
+**Admin → Setup → Business** lets the administrator set the organization name, billing address and phone. These values are stored in Supabase and are used in the application header, receipts/PDFs, bag labels and WhatsApp receipt messages.
+
+The default interface is **Graphite** (black and grey). Use the sun/moon button in the header to switch instantly between Graphite and Light. The palette button opens Appearance settings where the user can choose Graphite/Light and an optional accent color. Theme preference is saved on that browser/device.
