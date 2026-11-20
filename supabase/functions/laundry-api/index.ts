@@ -276,6 +276,308 @@ async function recordPayment(orderId, actor, payload) {
   return data?.[0] || null;
 }
 
+
+function quickStage(status) {
+  if (["washing", "ironing"].includes(status)) return "in_progress";
+  if (["ready", "out_for_delivery"].includes(status)) return "ready";
+  return status;
+}
+
+function dubaiDayKey(value) {
+  const d = new Date(value);
+  const shifted = new Date(d.getTime() + 4 * 3600 * 1000);
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+}
+
+function bucketKey(value, group = "day") {
+  const d = new Date(value);
+  const shifted = new Date(d.getTime() + 4 * 3600 * 1000);
+  const y = shifted.getUTCFullYear();
+  const m = shifted.getUTCMonth();
+  const day = shifted.getUTCDate();
+  if (group === "year") return String(y);
+  if (group === "month") return `${y}-${String(m + 1).padStart(2, "0")}`;
+  if (group === "week") {
+    const wd = shifted.getUTCDay() || 7;
+    const monday = new Date(Date.UTC(y, m, day - wd + 1));
+    return `${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, "0")}-${String(monday.getUTCDate()).padStart(2, "0")}`;
+  }
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseRangeDate(value, end = false) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T${end ? "23:59:59.999" : "00:00:00"}+04:00`;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+async function fetchPaged(table, select, configure = (q) => q) {
+  const out = [];
+  const pageSize = 1000;
+  for (let from = 0; from < 50000; from += pageSize) {
+    let q = db.from(table).select(select);
+    q = configure(q);
+    q = q.range(from, from + pageSize - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    const rows = data || [];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+async function fetchCustomersByIds(ids) {
+  const unique = uniq(ids);
+  const out = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const part = unique.slice(i, i + 100);
+    if (!part.length) continue;
+    const { data, error } = await db.from("laundry_customers").select("id,customer_code,name,mobile").in("id", part);
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+}
+
+async function fetchItemsByOrderIds(ids) {
+  const unique = uniq(ids);
+  const out = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const part = unique.slice(i, i + 100);
+    if (!part.length) continue;
+    const { data, error } = await db.from("laundry_order_items").select("order_id,quantity").in("order_id", part);
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+}
+
+function orderScopeQuery(q, actor) {
+  if (actor.actor_type === "customer") return q.eq("customer_id", actor.id);
+  if (actor.actor_type === "staff" && actor.role === "delivery") return q.or(`pickup_driver_id.eq.${actor.id},delivery_driver_id.eq.${actor.id}`);
+  return q;
+}
+
+async function buildReports(actor, params) {
+  const from = parseRangeDate(params.get("from"));
+  const to = parseRangeDate(params.get("to"), true);
+  if (!from || !to || new Date(from) > new Date(to)) throw new Error("Choose a valid report date range");
+  const group = ["day", "week", "month", "year"].includes(params.get("group")) ? params.get("group") : "day";
+  const calendarMonth = /^\d{4}-\d{2}$/.test(params.get("calendar_month") || "") ? params.get("calendar_month") : dubaiDayKey(new Date()).slice(0, 7);
+  const calFrom = `${calendarMonth}-01T00:00:00+04:00`;
+  const cm = Number(calendarMonth.slice(5, 7));
+  const cy = Number(calendarMonth.slice(0, 4));
+  const nextY = cm === 12 ? cy + 1 : cy;
+  const nextM = cm === 12 ? 1 : cm + 1;
+  const calTo = new Date(`${nextY}-${String(nextM).padStart(2, "0")}-01T00:00:00+04:00`).getTime() - 1;
+
+  const currentOrders = await fetchPaged(
+    "laundry_orders",
+    "id,order_no,customer_id,channel,laundry_status,total,pickup_driver_id,delivery_driver_id,created_at,updated_at,delivered_at",
+    (q) => orderScopeQuery(q, actor).order("created_at", { ascending: false })
+  );
+  const scopedOrderIds = new Set(currentOrders.map((o) => o.id));
+  const scopedCustomerIds = uniq(currentOrders.map((o) => o.customer_id));
+
+  let allPayments = [];
+  if (actor.actor_type === "staff" && actor.role === "delivery") {
+    allPayments = await fetchPaged("laundry_payments", "id,order_id,customer_id,amount,received_amount,method,payment_context,collected_by_staff_id,created_at", (q) => q.eq("collected_by_staff_id", actor.id).order("created_at", { ascending: false }));
+  } else if (actor.actor_type === "customer") {
+    allPayments = await fetchPaged("laundry_payments", "id,order_id,customer_id,amount,received_amount,method,payment_context,collected_by_staff_id,created_at", (q) => q.eq("customer_id", actor.id).order("created_at", { ascending: false }));
+  } else {
+    allPayments = await fetchPaged("laundry_payments", "id,order_id,customer_id,amount,received_amount,method,payment_context,collected_by_staff_id,created_at", (q) => q.order("created_at", { ascending: false }));
+  }
+  if (actor.actor_type === "staff" && actor.role !== "delivery") allPayments = allPayments.filter((p) => scopedOrderIds.has(p.order_id));
+
+  let credits = [];
+  if (actor.actor_type === "customer") {
+    credits = await fetchPaged("laundry_credit_ledger", "id,customer_id,order_id,amount,entry_type,created_at", (q) => q.eq("customer_id", actor.id).order("created_at", { ascending: false }));
+  } else if (actor.actor_type === "staff" && actor.role === "delivery") {
+    credits = [];
+  } else {
+    credits = await fetchPaged("laundry_credit_ledger", "id,customer_id,order_id,amount,entry_type,created_at", (q) => q.order("created_at", { ascending: false }));
+    const customerSet = new Set(scopedCustomerIds);
+    credits = credits.filter((c) => customerSet.has(c.customer_id));
+  }
+
+  let events = await fetchPaged("laundry_order_events", "id,order_id,to_status,actor_id,created_at", (q) => {
+    q = q.gte("created_at", from).lte("created_at", to).in("to_status", ["collected", "delivered"]);
+    if (actor.actor_type === "staff" && actor.role === "delivery") q = q.eq("actor_id", actor.id);
+    return q.order("created_at");
+  });
+  if (!(actor.actor_type === "staff" && actor.role === "delivery")) events = events.filter((e) => scopedOrderIds.has(e.order_id));
+
+  const periodOrders = currentOrders.filter((o) => {
+    const t = new Date(o.created_at).getTime();
+    return t >= new Date(from).getTime() && t <= new Date(to).getTime();
+  });
+  const periodOrderIds = new Set(periodOrders.map((o) => o.id));
+  const periodPayments = allPayments.filter((p) => {
+    const t = new Date(p.created_at).getTime();
+    return t >= new Date(from).getTime() && t <= new Date(to).getTime();
+  });
+  const periodCredits = credits.filter((c) => {
+    const t = new Date(c.created_at).getTime();
+    return t >= new Date(from).getTime() && t <= new Date(to).getTime();
+  });
+  const items = await fetchItemsByOrderIds(periodOrders.map((o) => o.id));
+  const piecesByOrder = {};
+  for (const i of items) piecesByOrder[i.order_id] = (piecesByOrder[i.order_id] || 0) + Number(i.quantity || 0);
+
+  const appliedByOrder = {};
+  for (const p of allPayments) appliedByOrder[p.order_id] = money((appliedByOrder[p.order_id] || 0) + Number(p.amount || 0));
+  const creditByCustomer = {};
+  for (const c of credits) creditByCustomer[c.customer_id] = money((creditByCustomer[c.customer_id] || 0) + Number(c.amount || 0));
+
+  const current = {
+    active_orders: 0,
+    outstanding: 0,
+    customer_credit: money(Object.values(creditByCustomer).reduce((s, n) => s + Number(n), 0)),
+    quick_stage_counts: { pickup_requested: 0, collected: 0, received: 0, in_progress: 0, ready: 0, delivered: 0 },
+    detailed_stage_counts: {},
+    aging: { collected_over_12h: 0, in_progress_over_48h: 0, ready_over_24h: 0 },
+  };
+  const now = Date.now();
+  for (const o of currentOrders) {
+    const applied = Number(appliedByOrder[o.id] || 0);
+    current.outstanding += Math.max(0, Number(o.total || 0) - applied);
+    if (o.laundry_status !== "delivered") current.active_orders += 1;
+    current.detailed_stage_counts[o.laundry_status] = (current.detailed_stage_counts[o.laundry_status] || 0) + 1;
+    const q = quickStage(o.laundry_status);
+    current.quick_stage_counts[q] = (current.quick_stage_counts[q] || 0) + 1;
+    const ageHours = (now - new Date(o.updated_at || o.created_at).getTime()) / 3600000;
+    if (o.laundry_status === "collected" && ageHours > 12) current.aging.collected_over_12h += 1;
+    if (["washing", "ironing"].includes(o.laundry_status) && ageHours > 48) current.aging.in_progress_over_48h += 1;
+    if (["ready", "out_for_delivery"].includes(o.laundry_status) && ageHours > 24) current.aging.ready_over_24h += 1;
+  }
+  current.outstanding = money(current.outstanding);
+
+  const period = {
+    orders: periodOrders.length,
+    pieces: items.reduce((s, i) => s + Number(i.quantity || 0), 0),
+    sales: money(periodOrders.reduce((s, o) => s + Number(o.total || 0), 0)),
+    payments_received: money(periodPayments.reduce((s, p) => s + Number(p.received_amount || 0), 0)),
+    collected: events.filter((e) => e.to_status === "collected").length,
+    delivered: events.filter((e) => e.to_status === "delivered").length,
+    credit_added: money(periodCredits.filter((c) => Number(c.amount) > 0).reduce((s, c) => s + Number(c.amount || 0), 0)),
+    credit_applied: money(Math.abs(periodCredits.filter((c) => Number(c.amount) < 0).reduce((s, c) => s + Number(c.amount || 0), 0))),
+  };
+  period.avg_order_value = period.orders ? money(period.sales / period.orders) : 0;
+
+  const method = {};
+  const context = {};
+  for (const p of periodPayments) {
+    method[p.method] = money((method[p.method] || 0) + Number(p.received_amount || 0));
+    context[p.payment_context] = money((context[p.payment_context] || 0) + Number(p.received_amount || 0));
+  }
+
+  const seriesMap = new Map();
+  const ensureBucket = (key) => {
+    if (!seriesMap.has(key)) seriesMap.set(key, { key, orders: 0, pieces: 0, sales: 0, payments_received: 0, collected: 0, delivered: 0 });
+    return seriesMap.get(key);
+  };
+  for (const o of periodOrders) {
+    const b = ensureBucket(bucketKey(o.created_at, group));
+    b.orders += 1; b.pieces += Number(piecesByOrder[o.id] || 0); b.sales += Number(o.total || 0);
+  }
+  for (const p of periodPayments) ensureBucket(bucketKey(p.created_at, group)).payments_received += Number(p.received_amount || 0);
+  for (const e of events) {
+    const b = ensureBucket(bucketKey(e.created_at, group));
+    if (e.to_status === "collected") b.collected += 1;
+    if (e.to_status === "delivered") b.delivered += 1;
+  }
+  const series = [...seriesMap.values()].sort((a, b) => a.key.localeCompare(b.key)).map((x) => ({ ...x, sales: money(x.sales), payments_received: money(x.payments_received) }));
+
+  let customers = [];
+  if (actor.actor_type === "staff" && ["admin", "manager"].includes(actor.role)) {
+    const customerRows = await fetchCustomersByIds(scopedCustomerIds);
+    const nameMap = new Map(customerRows.map((c) => [c.id, c]));
+    const rowMap = new Map();
+    const ensureCustomer = (cid) => {
+      if (!rowMap.has(cid)) rowMap.set(cid, { customer_id: cid, customer_code: nameMap.get(cid)?.customer_code || "", name: nameMap.get(cid)?.name || "Customer", mobile: nameMap.get(cid)?.mobile || "", orders: 0, pieces: 0, sales: 0, payments_received: 0, outstanding: 0, credit: Number(creditByCustomer[cid] || 0), last_order_at: null });
+      return rowMap.get(cid);
+    };
+    for (const o of currentOrders) {
+      const row = ensureCustomer(o.customer_id);
+      row.outstanding += Math.max(0, Number(o.total || 0) - Number(appliedByOrder[o.id] || 0));
+      if (!row.last_order_at || new Date(o.created_at) > new Date(row.last_order_at)) row.last_order_at = o.created_at;
+    }
+    for (const o of periodOrders) {
+      const row = ensureCustomer(o.customer_id); row.orders += 1; row.pieces += Number(piecesByOrder[o.id] || 0); row.sales += Number(o.total || 0);
+    }
+    for (const p of periodPayments) ensureCustomer(p.customer_id).payments_received += Number(p.received_amount || 0);
+    customers = [...rowMap.values()].map((r) => ({ ...r, sales: money(r.sales), payments_received: money(r.payments_received), outstanding: money(r.outstanding), credit: money(r.credit), net_position: money(r.outstanding - r.credit) })).sort((a, b) => b.sales - a.sales || b.payments_received - a.payments_received);
+  }
+
+  const calStart = new Date(calFrom).getTime();
+  const calEnd = calTo.getTime();
+  const calendarMap = new Map();
+  const calBucket = (key) => {
+    if (!calendarMap.has(key)) calendarMap.set(key, { date: key, orders: 0, sales: 0, payments_received: 0, collected: 0, delivered: 0 });
+    return calendarMap.get(key);
+  };
+  for (const o of currentOrders) {
+    const t = new Date(o.created_at).getTime();
+    if (t >= calStart && t <= calEnd) { const b = calBucket(dubaiDayKey(o.created_at)); b.orders += 1; b.sales += Number(o.total || 0); }
+  }
+  for (const p of allPayments) {
+    const t = new Date(p.created_at).getTime();
+    if (t >= calStart && t <= calEnd) calBucket(dubaiDayKey(p.created_at)).payments_received += Number(p.received_amount || 0);
+  }
+  let calendarEvents = await fetchPaged("laundry_order_events", "order_id,to_status,actor_id,created_at", (q) => {
+    q = q.gte("created_at", calFrom).lte("created_at", calTo.toISOString()).in("to_status", ["collected", "delivered"]);
+    if (actor.actor_type === "staff" && actor.role === "delivery") q = q.eq("actor_id", actor.id);
+    return q.order("created_at");
+  });
+  if (!(actor.actor_type === "staff" && actor.role === "delivery")) calendarEvents = calendarEvents.filter((e) => scopedOrderIds.has(e.order_id));
+  for (const e of calendarEvents) {
+    const b = calBucket(dubaiDayKey(e.created_at));
+    if (e.to_status === "collected") b.collected += 1;
+    if (e.to_status === "delivered") b.delivered += 1;
+  }
+  const calendar = [...calendarMap.values()].sort((a, b) => a.date.localeCompare(b.date)).map((x) => ({ ...x, sales: money(x.sales), payments_received: money(x.payments_received) }));
+
+  return {
+    ok: true,
+    role: actor.role,
+    range: { from, to, group, calendar_month: calendarMonth },
+    period,
+    current,
+    breakdowns: { payment_method: method, payment_context: context },
+    series,
+    customers,
+    calendar,
+  };
+}
+
+async function quickAdvance(order, actor) {
+  requireRole(actor, ["admin", "manager"]);
+  const status = order.laundry_status;
+  if (status === "pickup_requested") throw new Error("Pickup must be completed by the assigned delivery user");
+  if (status === "collected") { await setStatus(order, "received", actor, "Quick flow"); return "received"; }
+  if (status === "received") {
+    const target = order.items?.length > 0 && order.items.every((x) => x.service?.workflow === "iron_only") ? "ironing" : "washing";
+    await setStatus(order, target, actor, "Quick flow: started processing");
+    return target;
+  }
+  if (status === "washing") {
+    await setStatus(order, "ironing", actor, "Quick flow: processing");
+    await setStatus({ ...order, laundry_status: "ironing" }, "ready", actor, "Quick flow: marked ready");
+    return "ready";
+  }
+  if (status === "ironing") { await setStatus(order, "ready", actor, "Quick flow: marked ready"); return "ready"; }
+  if (status === "ready") {
+    const target = order.channel === "counter" ? "delivered" : "out_for_delivery";
+    await setStatus(order, target, actor, target === "delivered" ? "Quick flow: counter handover" : "Quick flow: sent for delivery");
+    return target;
+  }
+  if (status === "out_for_delivery") { await setStatus(order, "delivered", actor, "Quick flow: delivered"); return "delivered"; }
+  throw new Error("No further quick action is available");
+}
+
 async function actionHandler(actor, body) {
   const action = body.action;
 
@@ -381,7 +683,15 @@ async function actionHandler(actor, body) {
     const { error } = await db.from("laundry_orders").update({ [field]: driver.id }).eq("id", body.order_id);
     if (error) throw error;
     await audit(actor, `${kind}_driver_assigned`, "order", body.order_id, { driver_id: driver.id });
-    return { assigned: true };
+    let dispatched = false;
+    if (kind === "delivery" && body.dispatch === true) {
+      const order = await orderForAction(body.order_id);
+      if (order.laundry_status === "ready") {
+        await setStatus({ ...order, delivery_driver_id: driver.id }, "out_for_delivery", actor, "Quick flow: assigned and sent for delivery");
+        dispatched = true;
+      }
+    }
+    return { assigned: true, dispatched };
   }
 
   if (action === "collect_pickup") {
@@ -511,6 +821,13 @@ async function actionHandler(actor, body) {
     return { id: r.data.id };
   }
 
+
+  if (action === "quick_advance") {
+    const order = await orderForAction(body.order_id);
+    const status = await quickAdvance(order, actor);
+    return { status };
+  }
+
   if (action === "save_business_settings") {
     requireRole(actor, ["admin"]);
     const name = String(body.name || "").trim();
@@ -538,7 +855,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && (path === "/" || path === "/health")) {
-      return json({ ok: true, service: "laundry-api", version: "1.1.0", time: new Date().toISOString() });
+      return json({ ok: true, service: "laundry-api", version: "1.2.0", time: new Date().toISOString() });
     }
 
     if (req.method === "POST" && path === "/login") {
@@ -596,6 +913,10 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && path === "/bootstrap") {
       return json(await buildBootstrap(actor));
+    }
+
+    if (req.method === "GET" && path === "/reports") {
+      return json(await buildReports(actor, new URL(req.url).searchParams));
     }
 
     if (req.method === "POST" && path === "/action") {

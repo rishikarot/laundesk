@@ -4,6 +4,10 @@
     ["pickup_requested","Pickup requested"],["collected","Collected"],["received","Received"],
     ["washing","Washing"],["ironing","Ironing"],["ready","Ready"],["out_for_delivery","Out for delivery"],["delivered","Delivered"]
   ];
+  const QUICK_STAGES = [
+    ["pickup_requested","Pickup requested"],["collected","Collected"],["received","Received"],
+    ["in_progress","In progress"],["ready","Ready"],["delivered","Delivered"]
+  ];
   const state = {
     token: localStorage.getItem("laundry_token") || "",
     data: null,
@@ -16,14 +20,43 @@
     mode: localStorage.getItem("laundry_mode") || "graphite",
     orderView: localStorage.getItem("laundry_order_view") || "optimal",
     orderFilter: "all",
+    workflowMode: localStorage.getItem("laundry_workflow_mode") || "quick",
+    reportTab: "overview",
+    reportPreset: localStorage.getItem("laundry_report_preset") || "this_month",
+    reportGroup: localStorage.getItem("laundry_report_group") || "day",
+    reportFrom: "",
+    reportTo: "",
+    reportCalendarMonth: "",
+    reportData: null,
+    reportLoading: false,
   };
   const app = document.getElementById("app");
   const toastEl = document.getElementById("toast");
   const esc = (v="") => String(v).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
   const fmt = n => `AED ${Number(n || 0).toFixed(2)}`;
   const stageLabel = s => STAGES.find(x=>x[0]===s)?.[1] || s;
+  const quickStageKey = s => ["washing","ironing"].includes(s)?"in_progress":["ready","out_for_delivery"].includes(s)?"ready":s;
+  const quickStageLabel = s => QUICK_STAGES.find(x=>x[0]===quickStageKey(s))?.[1] || stageLabel(s);
   const roleName = r => ({admin:"Admin",manager:"Manager",delivery:"Delivery",customer:"Customer"}[r] || r);
   const id = x => document.getElementById(x);
+
+  const DUBAI_OFFSET_MS=4*3600*1000;
+  function dubaiDate(){const d=new Date(Date.now()+DUBAI_OFFSET_MS);return new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()))}
+  function dateKey(d){return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`}
+  function addDays(d,n){const x=new Date(d);x.setUTCDate(x.getUTCDate()+n);return x}
+  function monthEnd(d){return new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0))}
+  function reportRange(preset=state.reportPreset){
+    const today=dubaiDate(), wd=today.getUTCDay()||7; let from=today,to=today,label="Today";
+    if(preset==="yesterday"){from=to=addDays(today,-1);label="Yesterday"}
+    else if(preset==="this_week"){from=addDays(today,-wd+1);to=today;label="This week"}
+    else if(preset==="last_week"){to=addDays(today,-wd);from=addDays(to,-6);label="Last week"}
+    else if(preset==="this_month"){from=new Date(Date.UTC(today.getUTCFullYear(),today.getUTCMonth(),1));to=today;label="This month"}
+    else if(preset==="last_month"){const d=new Date(Date.UTC(today.getUTCFullYear(),today.getUTCMonth()-1,1));from=d;to=monthEnd(d);label="Last month"}
+    else if(preset==="this_year"){from=new Date(Date.UTC(today.getUTCFullYear(),0,1));to=today;label="This year"}
+    else if(preset==="custom"){return {from:state.reportFrom||dateKey(today),to:state.reportTo||dateKey(today),label:"Custom"}}
+    return {from:dateKey(from),to:dateKey(to),label};
+  }
+  if(!state.reportCalendarMonth) state.reportCalendarMonth=dateKey(dubaiDate()).slice(0,7);
 
   const THEME_PRESETS = ["#64748b","#2563eb","#0f766e","#7c3aed","#b45309"];
   function applyTheme(color, persist=true){
@@ -57,7 +90,13 @@
       sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/>',
       moon:'<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2z"/>',
       building:'<path d="M4 21V5l8-3 8 3v16"/><path d="M8 8h2M14 8h2M8 12h2M14 12h2M8 16h2M14 16h2M2 21h20"/>',
-      logout:'<path d="M10 17l5-5-5-5M15 12H3M14 3h7v18h-7"/>'
+      logout:'<path d="M10 17l5-5-5-5M15 12H3M14 3h7v18h-7"/>',
+      payment:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 15h4"/>',
+      driver:'<circle cx="8" cy="7" r="3"/><path d="M3 20a5 5 0 0 1 10 0M15 8h4l2 3v5h-6z"/><circle cx="17" cy="18" r="2"/><circle cx="21" cy="18" r="2"/>',
+      print:'<path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/>',
+      whatsapp:'<path d="M20 11.5a8 8 0 0 1-11.9 7L4 20l1.5-3.9A8 8 0 1 1 20 11.5z"/><path d="M9 8.5c.5 2.2 2.3 4 4.5 4.8l1.3-1.2 1.8.6"/>',
+      arrow:'<path d="M5 12h14M14 7l5 5-5 5"/>',
+      tag:'<path d="M20 13 13 20l-9-9V4h7z"/><circle cx="8.5" cy="8.5" r="1"/>'
     };
     return `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${paths[name]||paths.home}</svg>`;
   }
@@ -154,16 +193,16 @@
   function validViews(role){
     if(role==="admin") return ["home","orders","admin","reports"];
     if(role==="manager") return ["home","orders","new","reports"];
-    if(role==="delivery") return ["stops","orders","history","account"];
-    return ["home","orders","pickup","account"];
+    if(role==="delivery") return ["stops","orders","history","reports","account"];
+    return ["home","orders","pickup","reports","account"];
   }
 
   function navItems(role){
     const map={
       admin:[["home","Home","home"],["orders","Orders","orders"],["admin","Setup","admin"],["reports","Reports","reports"]],
       manager:[["home","Home","home"],["orders","Orders","orders"],["new","Create","plus"],["reports","Reports","reports"]],
-      delivery:[["stops","Stops","route"],["orders","Orders","orders"],["history","History","history"],["account","Account","user"]],
-      customer:[["home","Home","home"],["orders","Orders","orders"],["pickup","Pickup","pickup"],["account","Account","user"]]
+      delivery:[["stops","Stops","route"],["orders","Orders","orders"],["history","History","history"],["reports","Reports","reports"],["account","Account","user"]],
+      customer:[["home","Home","home"],["orders","Orders","orders"],["pickup","Pickup","pickup"],["reports","Reports","reports"],["account","Account","user"]]
     }; return map[role] || [];
   }
 
@@ -199,7 +238,7 @@
     if(call && state.token){
       try{setBusy(true,trigger,"Signing out…");await api("/logout",{method:"POST",body:{}})}catch{}finally{setBusy(false)}
     }
-    state.token=""; state.data=null; localStorage.removeItem("laundry_token"); renderLogin();
+    state.token=""; state.data=null; state.reportData=null; localStorage.removeItem("laundry_token"); renderLogin();
   }
 
   function renderApp(){
@@ -224,8 +263,8 @@
     const role=state.data.actor.role;
     if(role==="admin") return state.view==="home"?homeStaff():state.view==="orders"?ordersView():state.view==="admin"?adminView():reportsView();
     if(role==="manager") return state.view==="home"?homeStaff():state.view==="orders"?ordersView():state.view==="new"?newView():reportsView();
-    if(role==="delivery") return state.view==="stops"?deliveryStops():state.view==="orders"?ordersView(false):state.view==="history"?historyView():accountView();
-    return state.view==="home"?customerHome():state.view==="orders"?ordersView():state.view==="pickup"?customerPickup():accountView();
+    if(role==="delivery") return state.view==="stops"?deliveryStops():state.view==="orders"?ordersView(false):state.view==="history"?historyView():state.view==="reports"?reportsView():accountView();
+    return state.view==="home"?customerHome():state.view==="orders"?ordersView():state.view==="pickup"?customerPickup():state.view==="reports"?reportsView():accountView();
   }
 
   function titleBlock(kicker,title,sub,actions=""){
@@ -241,7 +280,7 @@
     return `${titleBlock("Today","Operations","What needs attention now.",action)}
       <div class="grid metrics">${metric("Active orders",s.active_orders,true)}${metric("Outstanding",fmt(s.outstanding))}${metric("Collected",fmt(s.payments_received))}${metric("Customer credit",fmt(s.customer_credits))}</div>
       <section class="section"><div class="section-head"><div><h2>Needs attention</h2><p class="sub small">Pickup requests and orders ready to hand over.</p></div></div>${urgent.length?`<div class="grid cards">${urgent.map(o=>orderCard(o,"optimal")).join("")}</div>`:`<div class="empty">You are up to date. No urgent work right now.</div>`}</section>
-      <section class="section"><div class="section-head"><div><h2>Work by stage</h2></div></div><div class="queue-strip">${STAGES.filter(([k])=>k!=="delivered").map(([k,l])=>`<div class="queue-chip"><b>${s.stage_counts[k]||0}</b><span>${l}</span></div>`).join("")}</div></section>`;
+      <section class="section"><div class="section-head"><div><h2>Work by stage</h2></div></div><div class="queue-strip">${QUICK_STAGES.filter(([k])=>k!=="delivered").map(([k,l])=>{const count=k==="in_progress"?(s.stage_counts.washing||0)+(s.stage_counts.ironing||0):k==="ready"?(s.stage_counts.ready||0)+(s.stage_counts.out_for_delivery||0):(s.stage_counts[k]||0);return `<div class="queue-chip"><b>${count}</b><span>${l}</span></div>`}).join("")}</div></section>`;
   }
 
   function customerHome(){
@@ -256,13 +295,13 @@
     const paymentLabel=o.outstanding>0?`Due ${fmt(o.outstanding)}`:(o.payment_status==="unpriced"?"Not priced":"Paid");
     if(mode==="detailed"){
       return `<article class="card order order-detailed" data-order-card="${o.id}"><div class="order-head"><div><div class="order-no">${esc(o.order_no)}</div><div class="small muted">${esc(o.customer?.name||"")}${pieces?` · ${pieces} pcs`:""}</div></div><div class="money">${fmt(o.total)}</div></div>
-        <div class="order-meta"><span class="stage active">${stageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
+        <div class="order-meta"><span class="stage active">${quickStageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
         <div class="order-money"><div><span>Paid</span><b>${fmt(o.paid)}</b></div><div><span>Due</span><b>${fmt(o.outstanding)}</b></div>${o.customer_credit>0?`<div><span>Credit</span><b>${fmt(o.customer_credit)}</b></div>`:""}<div><span>Type</span><b>${o.channel==="counter"?"Counter":"Pickup"}</b></div></div>
         <button class="btn block" data-action="open-order" data-id="${o.id}">Details</button></article>`;
     }
     return `<article class="card order order-optimal" data-order-card="${o.id}">
       <div class="order-optimal-main"><div class="order-no">${esc(o.order_no)}</div><div class="order-customer">${esc(o.customer?.name||"")}${pieces?` · ${pieces} pcs`:""}</div></div>
-      <div class="order-optimal-status"><span class="stage active">${stageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
+      <div class="order-optimal-status"><span class="stage active">${quickStageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
       <div class="order-optimal-money"><span>${paymentLabel}</span><b>${fmt(o.total)}</b></div>
       <button class="btn smallbtn order-details-btn" data-action="open-order" data-id="${o.id}" aria-label="Open ${esc(o.order_no)} details">Details</button>
     </article>`;
@@ -271,7 +310,7 @@
   function visibleOrders(includeDelivered=true){
     let orders=state.data.orders||[];
     if(!includeDelivered) orders=orders.filter(o=>o.laundry_status!=="delivered");
-    if(state.orderFilter!=="all") orders=orders.filter(o=>o.laundry_status===state.orderFilter);
+    if(state.orderFilter!=="all") orders=orders.filter(o=>QUICK_STAGES.some(([k])=>k===state.orderFilter)?quickStageKey(o.laundry_status)===state.orderFilter:o.laundry_status===state.orderFilter);
     return orders;
   }
 
@@ -289,7 +328,7 @@
     if(!includeDelivered) orders=orders.filter(o=>o.laundry_status!=="delivered");
     const create=state.data.actor.role==="manager"?`<button class="btn primary" data-action="counter-order">+ New</button>`:"";
     return `${titleBlock("All work","Orders",`${orders.length} visible to your account.`,create)}
-      <div class="orders-toolbar"><div class="tabs order-stage-tabs">${[["all","All"],...STAGES].map(([s,l])=>`<button class="tab ${s==="all"?'active':''}" data-filter-stage="${s}">${l}</button>`).join("")}</div><div class="view-switch" aria-label="Order view"><button class="view-switch-btn ${state.orderView==="optimal"?'active':''}" data-order-view="optimal">Optimal</button><button class="view-switch-btn ${state.orderView==="detailed"?'active':''}" data-order-view="detailed">Detailed</button></div></div>
+      <div class="orders-toolbar"><div class="tabs order-stage-tabs">${[["all","All"],...QUICK_STAGES].map(([s,l])=>`<button class="tab ${s==="all"?'active':''}" data-filter-stage="${s}">${l}</button>`).join("")}</div><div class="view-switch" aria-label="Order view"><button class="view-switch-btn ${state.orderView==="optimal"?'active':''}" data-order-view="optimal">Optimal</button><button class="view-switch-btn ${state.orderView==="detailed"?'active':''}" data-order-view="detailed">Detailed</button></div></div>
       <div id="orderList" class="${state.orderView==="detailed"?'grid cards order-list detailed-view':'order-list optimal-view'}">${orders.length?orders.map(o=>orderCard(o,state.orderView)).join(""):`<div class="empty">No orders.</div>`}</div>`;
   }
 
@@ -314,12 +353,51 @@
   function accountView(){const a=state.data.actor; return `${titleBlock("Account","${esc(a.display_name)}",roleName(a.role))}<div class="grid cards"><div class="card stack"><div><div class="kicker">Role</div><div class="strong">${roleName(a.role)}</div></div>${a.mobile?`<div><div class="kicker">Mobile</div><div class="strong">${esc(a.mobile)}</div></div>`:""}${a.customer_code?`<div><div class="kicker">Customer code</div><div class="mono strong">${esc(a.customer_code)}</div></div>`:""}</div><div class="card stack"><div><div class="kicker">Appearance</div><h3>Theme</h3><p class="small muted">Switch Graphite / Light and optionally adjust the accent.</p></div><button class="btn" data-action="theme">${icon("palette","sm")}Change theme</button><button class="btn danger" data-action="logout">Sign out</button></div></div>`}
   function customerPickup(){return `${titleBlock("Doorstep","Request pickup","One request. Staff will assign the driver.")}<form id="pickupSelfForm" class="card stack"><label>Pickup address<textarea name="address" required>${esc(state.data.actor.address||"")}</textarea></label><label>Note <textarea name="note" placeholder="Building, flat, preferred time..."></textarea></label><button class="btn primary block">REQUEST PICKUP →</button></form>`}
 
+  function reportTabs(role){
+    if(["admin","manager"].includes(role)) return [["overview","Overview"],["customers","Customers"],["operations","Operations"],["payments","Payments"],["calendar","Calendar"]];
+    if(role==="delivery") return [["overview","My activity"],["operations","Operations"],["payments","Payments"],["calendar","Calendar"]];
+    return [["overview","My report"],["payments","Payments"],["calendar","Calendar"]];
+  }
+
+  function reportControls(){
+    const presets=[["today","Today"],["yesterday","Yesterday"],["this_week","This week"],["last_week","Last week"],["this_month","This month"],["last_month","Last month"],["this_year","This year"],["custom","Custom"]];
+    return `<div class="report-controls"><div class="report-presets">${presets.map(([k,l])=>`<button class="chip ${state.reportPreset===k?'active':''}" data-report-preset="${k}">${l}</button>`).join("")}</div><div class="report-options"><label>Group by<select id="reportGroup"><option value="day" ${state.reportGroup==='day'?'selected':''}>Day</option><option value="week" ${state.reportGroup==='week'?'selected':''}>Week</option><option value="month" ${state.reportGroup==='month'?'selected':''}>Month</option><option value="year" ${state.reportGroup==='year'?'selected':''}>Year</option></select></label></div>${state.reportPreset==='custom'?`<form id="reportCustomForm" class="report-custom"><label>From<input type="date" name="from" value="${esc(state.reportFrom||reportRange('today').from)}" required></label><label>To<input type="date" name="to" value="${esc(state.reportTo||reportRange('today').to)}" required></label><button class="btn primary smallbtn">Apply</button></form>`:''}</div>`;
+  }
+
+  function reportLoading(){return `<div class="report-loading"><span class="btn-spinner"></span><div><b>Loading report</b><span>Calculating orders, payments and workflow activity…</span></div></div>`}
+  function breakdownCards(obj){const entries=Object.entries(obj||{});return entries.length?`<div class="report-breakdown">${entries.map(([k,v])=>`<div class="card report-break"><span>${esc(k.replaceAll('_',' '))}</span><b>${fmt(v)}</b></div>`).join("")}</div>`:`<div class="empty">No activity in this period.</div>`}
+  function trendTable(rows){return rows?.length?`<div class="table-wrap report-table"><table><thead><tr><th>Period</th><th>Orders</th><th>Pieces</th><th>Sales</th><th>Received</th><th>Collected</th><th>Delivered</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="mono">${esc(r.key)}</td><td>${r.orders}</td><td>${r.pieces}</td><td>${fmt(r.sales)}</td><td>${fmt(r.payments_received)}</td><td>${r.collected}</td><td>${r.delivered}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty">No activity in this period.</div>`}
+  function netPositionText(v){v=Number(v||0);return v>0?`${fmt(v)} due`:v<0?`${fmt(Math.abs(v))} credit`:`Settled`}
+
+  function reportOverview(r){
+    const role=state.data.actor.role,p=r.period,c=r.current;
+    if(role==="delivery") return `<div class="report-section"><div class="report-section-head"><div><div class="kicker">Period activity</div><h2>My work</h2></div></div><div class="grid metrics report-metrics">${metric("Collected",p.collected,true)}${metric("Delivered",p.delivered)}${metric("Payments collected",fmt(p.payments_received))}${metric("Assigned active",c.active_orders)}</div></div><div class="report-section"><h2>Trend</h2>${trendTable(r.series)}</div>`;
+    if(role==="customer") return `<div class="report-section"><div class="report-section-head"><div><div class="kicker">Period activity</div><h2>My laundry</h2></div></div><div class="grid metrics report-metrics">${metric("Orders",p.orders,true)}${metric("Pieces",p.pieces)}${metric("Spend",fmt(p.sales))}${metric("Paid",fmt(p.payments_received))}</div></div><div class="report-section"><div class="report-section-head"><div><div class="kicker">Current position</div><h2>My balance</h2></div></div><div class="grid metrics report-metrics">${metric("Amount due",fmt(c.outstanding),true)}${metric("Available credit",fmt(c.customer_credit))}${metric("Active orders",c.active_orders)}${metric("Net",netPositionText(c.outstanding-c.customer_credit))}</div></div><div class="report-section"><h2>Trend</h2>${trendTable(r.series)}</div>`;
+    return `<div class="report-section"><div class="report-section-head"><div><div class="kicker">Period activity</div><h2>Business activity</h2></div><span class="report-note">Filtered by selected dates</span></div><div class="grid metrics report-metrics">${metric("Orders",p.orders,true)}${metric("Pieces",p.pieces)}${metric("Sales",fmt(p.sales))}${metric("Cash received",fmt(p.payments_received))}${metric("Collected",p.collected)}${metric("Delivered",p.delivered)}${metric("Avg order",fmt(p.avg_order_value))}</div></div><div class="report-section"><div class="report-section-head"><div><div class="kicker">Current position</div><h2>What is open now</h2></div><span class="report-note">Not date-filtered</span></div><div class="grid metrics report-metrics">${metric("Active orders",c.active_orders,true)}${metric("Outstanding",fmt(c.outstanding))}${metric("Customer credit",fmt(c.customer_credit))}${metric("In progress",c.quick_stage_counts.in_progress||0)}${metric("Ready",c.quick_stage_counts.ready||0)}</div></div><div class="report-section"><h2>Trend</h2>${trendTable(r.series)}</div>`;
+  }
+
+  function reportCustomers(r){return `<div class="report-section"><div class="report-section-head"><div><div class="kicker">Customer position</div><h2>Customer-wise business</h2></div><span class="report-note">Net = outstanding − credit</span></div>${r.customers?.length?`<div class="table-wrap report-table customer-report"><table><thead><tr><th>Customer</th><th>Orders</th><th>Pieces</th><th>Sales</th><th>Received</th><th>Outstanding</th><th>Credit</th><th>Net position</th></tr></thead><tbody>${r.customers.map(c=>`<tr><td><b>${esc(c.name)}</b><div class="small muted mono">${esc(c.customer_code)}</div></td><td>${c.orders}</td><td>${c.pieces}</td><td>${fmt(c.sales)}</td><td>${fmt(c.payments_received)}</td><td>${fmt(c.outstanding)}</td><td>${fmt(c.credit)}</td><td class="strong ${c.net_position<0?'credit-text':c.net_position>0?'due-text':''}">${netPositionText(c.net_position)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty">No customer activity in this period.</div>`}</div>`}
+
+  function reportOperations(r){const c=r.current,p=r.period;const qs=c.quick_stage_counts||{};return `<div class="report-section"><div class="report-section-head"><div><div class="kicker">Current workload</div><h2>Quick workflow queue</h2></div></div><div class="queue-strip report-queue">${QUICK_STAGES.filter(([k])=>k!=="delivered").map(([k,l])=>`<div class="queue-chip"><b>${qs[k]||0}</b><span>${l}</span></div>`).join("")}</div></div><div class="report-section"><div class="grid metrics report-metrics">${metric("Collected in period",p.collected,true)}${metric("Delivered in period",p.delivered)}${metric("Collected >12h",c.aging.collected_over_12h)}${metric("In progress >48h",c.aging.in_progress_over_48h)}${metric("Ready >24h",c.aging.ready_over_24h)}</div></div><details class="card report-details"><summary>Detailed stage counts</summary><div class="report-stage-list">${STAGES.map(([k,l])=>`<div><span>${l}</span><b>${c.detailed_stage_counts[k]||0}</b></div>`).join("")}</div></details>`}
+
+  function reportPayments(r){const p=r.period,c=r.current,role=state.data.actor.role;return `<div class="report-section"><div class="grid metrics report-metrics">${metric(role==="delivery"?"Collected by me":"Cash received",fmt(p.payments_received),true)}${role!=="delivery"?metric("Outstanding now",fmt(c.outstanding)):''}${role!=="delivery"?metric("Customer credit",fmt(c.customer_credit)):''}${role!=="delivery"?metric("Credit added",fmt(p.credit_added)):''}${role!=="delivery"?metric("Credit applied",fmt(p.credit_applied)):''}</div></div><div class="report-section"><h2>By payment method</h2>${breakdownCards(r.breakdowns.payment_method)}</div><div class="report-section"><h2>By collection point</h2>${breakdownCards(r.breakdowns.payment_context)}</div>`}
+
+  function reportCalendar(r){
+    const month=r.range.calendar_month||state.reportCalendarMonth;const first=new Date(`${month}-01T00:00:00Z`),days=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate(),offset=(first.getUTCDay()+6)%7,map=new Map((r.calendar||[]).map(x=>[x.date,x]));let cells='';
+    for(let i=0;i<offset;i++)cells+='<div class="calendar-cell blank"></div>';
+    for(let day=1;day<=days;day++){const key=`${month}-${String(day).padStart(2,'0')}`,x=map.get(key)||{};cells+=`<div class="calendar-cell ${x.orders||x.collected||x.delivered||x.payments_received?'has-data':''}"><div class="calendar-day">${day}</div><div class="calendar-stat"><span>C</span><b>${x.collected||0}</b></div><div class="calendar-stat"><span>D</span><b>${x.delivered||0}</b></div><div class="calendar-income">${x.payments_received?fmt(x.payments_received):'—'}</div></div>`}
+    return `<div class="report-section"><div class="report-section-head"><div><div class="kicker">Daily operations</div><h2>Calendar</h2><p class="small muted">C = Collected · D = Delivered · amount = cash received.</p></div><label class="calendar-month">Month<input id="reportCalendarMonth" type="month" value="${month}"></label></div><div class="calendar-weekdays">${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(x=>`<span>${x}</span>`).join('')}</div><div class="calendar-grid">${cells}</div></div>`;
+  }
+
+  async function loadReports(show=true){
+    if(!state.token)return;const range=reportRange();state.reportLoading=true;if(show&&state.view==="reports")renderApp();
+    try{const qs=new URLSearchParams({from:range.from,to:range.to,group:state.reportGroup,calendar_month:state.reportCalendarMonth});state.reportData=await api(`/reports?${qs.toString()}`)}catch(e){toast(e.message,true)}finally{state.reportLoading=false;if(state.view==="reports")renderApp()}
+  }
+
   function reportsView(){
-    const s=state.data.summary;
-    return `${titleBlock("Simple numbers","Reports","Operational and payment status stay separate.")}
-      <div class="grid metrics">${metric("Active orders",s.active_orders,true)}${metric("Outstanding",fmt(s.outstanding))}${metric("Payments received",fmt(s.payments_received))}${metric("Customer credits",fmt(s.customer_credits))}</div>
-      <section class="section"><h2>Stage queue</h2><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Count</th></tr></thead><tbody>${STAGES.map(([k,l])=>`<tr><td>${l}</td><td class="strong">${s.stage_counts[k]||0}</td></tr>`).join("")}</tbody></table></div></section>
-      <section class="section"><h2>Outstanding orders</h2><div class="grid cards">${state.data.orders.filter(o=>o.outstanding>0).slice(0,12).map(o=>orderCard(o,"optimal")).join("")||`<div class="empty">No outstanding balances.</div>`}</div></section>`;
+    const role=state.data.actor.role,tabs=reportTabs(role),range=reportRange();if(!tabs.some(([k])=>k===state.reportTab))state.reportTab=tabs[0][0];
+    const content=state.reportLoading?reportLoading():!state.reportData?`<div class="empty">Choose a period to load reports.</div>`:state.reportTab==="customers"?reportCustomers(state.reportData):state.reportTab==="operations"?reportOperations(state.reportData):state.reportTab==="payments"?reportPayments(state.reportData):state.reportTab==="calendar"?reportCalendar(state.reportData):reportOverview(state.reportData);
+    return `${titleBlock(role==="customer"?"My data":role==="delivery"?"My activity":"Business intelligence","Reports",`${range.label} · ${range.from} to ${range.to}`)}${reportControls()}<div class="tabs report-tabs">${tabs.map(([k,l])=>`<button class="tab ${state.reportTab===k?'active':''}" data-report-tab="${k}">${l}</button>`).join("")}</div><div id="reportPanel">${content}</div>`;
   }
 
   function adminView(){
@@ -335,38 +413,59 @@
   function adminCatalog(){return `<div class="grid cards"><div class="card"><div class="row between"><h2>Garments</h2><button class="btn smallbtn primary" data-action="new-garment">+ Add</button></div><div class="list">${state.data.refs.garments.map(g=>`<div class="list-row"><div class="row between"><div><b>${esc(g.name)}</b><div class="small mono muted">${esc(g.code)}</div></div><span class="badge ${g.active?'paid':'unpaid'}">${g.active?'active':'off'}</span></div><button class="btn smallbtn" data-action="edit-garment" data-id="${g.id}">Edit</button></div>`).join("")}</div></div><div class="card"><div class="row between"><h2>Services</h2><button class="btn smallbtn primary" data-action="new-service">+ Add</button></div><div class="list">${state.data.refs.services.map(s=>`<div class="list-row"><div class="row between"><div><b>${esc(s.name)}</b><div class="small mono muted">${esc(s.workflow)}</div></div><span class="badge ${s.active?'paid':'unpaid'}">${s.active?'active':'off'}</span></div><button class="btn smallbtn" data-action="edit-service" data-id="${s.id}">Edit</button></div>`).join("")}</div></div></div>`}
   function adminDiscounts(){return `<div class="row between"><h2>Discounts</h2><button class="btn primary" data-action="new-discount">+ Discount</button></div><div class="list">${state.data.refs.discounts.map(d=>`<div class="list-row"><div class="row between"><div><b>${esc(d.name)}</b><div class="small muted">${d.discount_type==='percent'?d.value+'%':fmt(d.value)}</div></div><span class="badge ${d.active?'paid':'unpaid'}">${d.active?'active':'off'}</span></div><button class="btn smallbtn" data-action="edit-discount" data-id="${d.id}">Edit</button></div>`).join("")}</div>`}
 
-  function stageBar(order){
+  function stageBar(order,mode=state.workflowMode){
+    if(mode==="quick"){
+      const current=quickStageKey(order.laundry_status),idx=QUICK_STAGES.findIndex(([s])=>s===current);
+      return `<div class="stagebar quick-stagebar">${QUICK_STAGES.map(([s,l],i)=>`<span class="stage ${i<idx?'done':i===idx?'active':''}">${l}</span>`).join("")}</div>`;
+    }
     const visible=order.items.length && order.items.every(i=>i.service?.workflow==="iron_only") ? STAGES.filter(([s])=>s!=="washing") : STAGES;
     const idx=visible.findIndex(([s])=>s===order.laundry_status);
     return `<div class="stagebar">${visible.map(([s,l],i)=>`<span class="stage ${i<idx?'done':i===idx?'active':''}">${l}</span>`).join("")}</div>`;
   }
 
+  function orderActionButton(action,id,label,iconName,extra=""){
+    return `<button class="order-action" data-action="${action}" data-id="${id}" ${extra}>${icon(iconName)}<span>${label}</span></button>`;
+  }
+
+  function quickNextAction(o){
+    if(o.laundry_status==="collected")return {label:"Received",sub:"Quick flow"};
+    if(o.laundry_status==="received")return {label:"Start processing",sub:"Quick flow"};
+    if(["washing","ironing"].includes(o.laundry_status))return {label:"Mark ready",sub:"Quick flow"};
+    if(o.laundry_status==="ready")return o.channel==="counter"?{label:"Deliver / hand over",sub:"Quick flow"}:{label:"Send for delivery",sub:"Quick flow"};
+    if(o.laundry_status==="out_for_delivery")return {label:"Mark delivered",sub:"Quick flow"};
+    return null;
+  }
+
   function openOrder(orderId){
     const o=state.data.orders.find(x=>x.id===orderId); if(!o)return;
-    const role=state.data.actor.role;
-    const driverOptions=state.data.staff?.filter(s=>s.role==="delivery"&&s.active)||[];
-    let actions="";
-    if(role==="delivery" && o.laundry_status==="pickup_requested" && o.pickup_driver_id===state.data.actor.id) actions+=`<button class="btn primary block" data-action="collect" data-id="${o.id}">COLLECT GARMENTS →</button>`;
-    if(role==="delivery" && o.laundry_status==="out_for_delivery" && o.delivery_driver_id===state.data.actor.id) actions+=`<button class="btn primary block" data-action="deliver" data-id="${o.id}">DELIVER / TAKE PAYMENT →</button>`;
+    const role=state.data.actor.role; let primary=""; const secondary=[];
+    if(role==="delivery" && o.laundry_status==="pickup_requested" && o.pickup_driver_id===state.data.actor.id) primary=`<button class="order-next-action" data-action="collect" data-id="${o.id}"><span class="next-copy"><small>Next action</small><b>Collect garments</b></span>${icon("arrow")}</button>`;
+    if(role==="delivery" && o.laundry_status==="out_for_delivery" && o.delivery_driver_id===state.data.actor.id) primary=`<button class="order-next-action" data-action="deliver" data-id="${o.id}"><span class="next-copy"><small>Next action</small><b>Deliver / take payment</b></span>${icon("arrow")}</button>`;
     if(["admin","manager"].includes(role)){
-      if(o.next_statuses?.[0]) actions+=`<button class="btn primary" data-action="advance" data-id="${o.id}" data-status="${o.next_statuses[0]}">${stageLabel(o.next_statuses[0]).toUpperCase()} →</button>`;
-      actions+=`<button class="btn" data-action="payment" data-id="${o.id}">Record payment</button>`;
-      if(o.customer_credit>0 && o.outstanding>0) actions+=`<button class="btn" data-action="credit" data-id="${o.id}">Apply ${fmt(o.customer_credit)} credit</button>`;
-      if(o.channel==="pickup") actions+=`<button class="btn" data-action="assign" data-id="${o.id}" data-kind="${o.laundry_status==='ready'||o.laundry_status==='out_for_delivery'?'delivery':'pickup'}">Assign driver</button>`;
+      if(state.workflowMode==="quick"){
+        const q=quickNextAction(o);
+        if(o.laundry_status==="pickup_requested"){
+          primary=o.pickup_driver_id?`<div class="order-waiting"><small>Next action</small><b>Awaiting driver collection</b></div>`:`<button class="order-next-action" data-action="assign" data-id="${o.id}" data-kind="pickup"><span class="next-copy"><small>Next action</small><b>Assign pickup driver</b></span>${icon("arrow")}</button>`;
+        }else if(q && o.laundry_status==="ready" && o.channel==="pickup" && !o.delivery_driver_id){
+          primary=`<button class="order-next-action" data-action="assign" data-id="${o.id}" data-kind="delivery" data-dispatch="true"><span class="next-copy"><small>Next action</small><b>Assign + send delivery</b></span>${icon("arrow")}</button>`;
+        }else if(q){
+          primary=`<button class="order-next-action" data-action="quick-advance" data-id="${o.id}"><span class="next-copy"><small>${q.sub}</small><b>${q.label}</b></span>${icon("arrow")}</button>`;
+        }
+      }else if(o.next_statuses?.[0]) primary=`<button class="order-next-action" data-action="advance" data-id="${o.id}" data-status="${o.next_statuses[0]}"><span class="next-copy"><small>Detailed stage</small><b>${esc(stageLabel(o.next_statuses[0]))}</b></span>${icon("arrow")}</button>`;
+      secondary.push(orderActionButton("payment",o.id,"Payment","payment"));
+      if(o.channel==="pickup") secondary.push(orderActionButton("assign",o.id,"Driver","driver",`data-kind="${o.laundry_status==='ready'||o.laundry_status==='out_for_delivery'?'delivery':'pickup'}"`));
     }
-    actions+=`<button class="btn" data-action="print-receipt" data-id="${o.id}">Receipt / PDF</button>`;
-    if(o.pieces.length) actions+=`<button class="btn" data-action="print-labels" data-id="${o.id}">Bag + garment tags</button>`;
-    if(o.customer?.mobile) actions+=`<button class="btn" data-action="whatsapp" data-id="${o.id}">WhatsApp</button>`;
-    state.modal=`<div class="modal-backdrop"><section class="modal"><div class="modal-head"><div><div class="kicker">${o.channel} order</div><h2 class="mono">${esc(o.order_no)}</h2></div><button class="x" data-action="close-modal">×</button></div>
-      ${stageBar(o)}
-      <div class="grid metrics" style="margin-top:12px">${metric("Total",fmt(o.total),true)}${metric("Paid",fmt(o.paid))}${metric("Due",fmt(o.outstanding))}${metric("Credit",fmt(o.customer_credit))}</div>
-      <div class="section card"><div class="row between"><div><div class="kicker">Customer</div><h3>${esc(o.customer?.name||"")}</h3><div class="small">${esc(o.customer?.customer_code||"")} · ${esc(o.customer?.mobile||"")}</div></div><span class="badge ${o.payment_status}">${o.payment_status}</span></div></div>
-      <div class="section"><div class="kicker">Pieces</div><div class="list">${o.items.length?o.items.map(i=>`<div class="list-row"><div class="row between"><span>${i.quantity} × ${esc(i.garment?.name||"")} <span class="muted">/ ${esc(i.service?.name||"")}</span></span><b>${fmt(i.line_total)}</b></div></div>`).join(""):`<div class="empty">Garments will be captured at pickup.</div>`}</div></div>
-      ${o.payments.length?`<div class="section"><div class="kicker">Payments</div><div class="list">${o.payments.map(p=>`<div class="list-row"><div class="row between"><span>${esc(p.method)} · ${esc(p.payment_context)}</span><b>${fmt(p.received_amount)}</b></div><div class="small muted">Applied to order: ${fmt(p.amount)}</div></div>`).join("")}</div></div>`:""}
-      <div class="section stack">${actions}</div>
-      ${driverOptions.length?`<div class="small muted" style="margin-top:12px">Driver assignment is available only to Manager/Admin.</div>`:""}
-    </section></div>`;
-    renderApp();
+    secondary.push(orderActionButton("print-menu",o.id,"Print","print")); if(o.customer?.mobile)secondary.push(orderActionButton("whatsapp",o.id,"WhatsApp","whatsapp"));
+    const subStatus=state.workflowMode==="quick"&&o.laundry_status==="out_for_delivery"?`<span class="detail-substatus">Detailed: Out for delivery</span>`:"";
+    state.modal=`<div class="modal-backdrop"><section class="modal order-modal"><div class="modal-head"><div><div class="kicker">${o.channel} order</div><h2 class="mono">${esc(o.order_no)}</h2></div><button class="x" data-action="close-modal">×</button></div>
+      <div class="workflow-mode"><button class="${state.workflowMode==='quick'?'active':''}" data-workflow-mode="quick" data-id="${o.id}">Quick flow</button><button class="${state.workflowMode==='detailed'?'active':''}" data-workflow-mode="detailed" data-id="${o.id}">Detailed stages</button></div>
+      ${stageBar(o)}${subStatus}
+      <div class="grid metrics order-metrics" style="margin-top:12px">${metric("Total",fmt(o.total),true)}${metric("Paid",fmt(o.paid))}${metric("Due",fmt(o.outstanding))}${metric("Credit",fmt(o.customer_credit))}</div>
+      <div class="section card order-customer-card"><div class="row between"><div><div class="kicker">Customer</div><h3>${esc(o.customer?.name||"")}</h3><div class="small">${esc(o.customer?.customer_code||"")} · ${esc(o.customer?.mobile||"")}</div></div><span class="badge ${o.payment_status}">${o.payment_status}</span></div></div>
+      <div class="section order-pieces"><div class="kicker">Pieces</div><div class="list">${o.items.length?o.items.map(i=>`<div class="list-row"><div class="row between"><span>${i.quantity} × ${esc(i.garment?.name||"")} <span class="muted">/ ${esc(i.service?.name||"")}</span></span><b>${fmt(i.line_total)}</b></div></div>`).join(""):`<div class="empty compact-empty">Garments will be captured at pickup.</div>`}</div></div>
+      ${o.payments.length?`<details class="section order-payments"><summary>Payment history <span>${o.payments.length}</span></summary><div class="list" style="margin-top:8px">${o.payments.map(p=>`<div class="list-row"><div class="row between"><span>${esc(p.method)} · ${esc(p.payment_context)}</span><b>${fmt(p.received_amount)}</b></div><div class="small muted">Applied to order: ${fmt(p.amount)}</div></div>`).join("")}</div></details>`:""}
+      <div class="order-action-dock">${primary}<div class="order-action-grid">${secondary.join("")}</div></div>
+    </section></div>`; renderApp();
   }
 
   function itemPicker(serviceId, quantities={}){
@@ -399,8 +498,12 @@
   function openDeliver(orderId){const o=state.data.orders.find(x=>x.id===orderId);state.modal=`<div class="modal-backdrop"><form class="modal" id="deliverForm" data-order="${o.id}"><div class="modal-head"><div><div class="kicker">Handover</div><h2>${esc(o.customer.name)}</h2><div class="mono small">${o.order_no}</div></div><button type="button" class="x" data-action="close-modal">×</button></div><div class="grid metrics">${metric("Due",fmt(o.outstanding),true)}${metric("Credit",fmt(o.customer_credit))}</div><div class="section form-grid two"><label>Payment received<input class="input" name="payment_amount" type="number" min="0" step="0.01" value="${o.outstanding||''}"></label><label>Method<select name="payment_method"><option>cash</option><option>card</option><option>bank</option><option>other</option></select></label></div><p class="small muted">Leave payment blank/0 if already settled. Delivery status and payment status are separate.</p><button class="btn primary block">CONFIRM HANDOVER →</button></form></div>`;renderApp()}
 
   function simpleModal(title,body,formId){state.modal=`<div class="modal-backdrop"><form class="modal" id="${formId}"><div class="modal-head"><h2>${title}</h2><button type="button" class="x" data-action="close-modal">×</button></div>${body}</form></div>`;renderApp()}
-  function openPayment(o){simpleModal("Record payment",`<div class="grid metrics">${metric("Due",fmt(o.outstanding),true)}${metric("Credit",fmt(o.customer_credit))}</div><div class="section stack"><input type="hidden" name="order_id" value="${o.id}"><label>Amount received<input class="input" name="amount" type="number" min="0.01" step="0.01" value="${o.outstanding||''}" required></label><label>Method<select name="method"><option>cash</option><option>card</option><option>bank</option><option>other</option></select></label><label>Where<select name="context"><option value="shop">At shop</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></label><button class="btn primary block">SAVE PAYMENT →</button></div>`,"paymentForm")}
-  function openAssign(o,kind){const ds=state.data.staff.filter(s=>s.role==="delivery"&&s.active);simpleModal(`Assign ${kind}`,`<div class="stack"><input type="hidden" name="order_id" value="${o.id}"><input type="hidden" name="kind" value="${kind}"><label>Delivery user<select name="driver_id" required>${ds.map(d=>`<option value="${d.id}">${esc(d.display_name)}</option>`).join("")}</select></label><button class="btn primary block">ASSIGN →</button></div>`,"assignForm")}
+  function openPayment(o){simpleModal("Record payment",`<div class="grid metrics">${metric("Due",fmt(o.outstanding),true)}${metric("Credit",fmt(o.customer_credit))}</div>${o.customer_credit>0&&o.outstanding>0?`<div class="section"><button type="button" class="btn block" data-action="credit" data-id="${o.id}">Apply ${fmt(Math.min(o.customer_credit,o.outstanding))} customer credit</button></div>`:""}<div class="section stack"><input type="hidden" name="order_id" value="${o.id}"><label>Amount received<input class="input" name="amount" type="number" min="0.01" step="0.01" value="${o.outstanding||''}" required></label><label>Method<select name="method"><option>cash</option><option>card</option><option>bank</option><option>other</option></select></label><label>Where<select name="context"><option value="shop">At shop</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></label><button class="btn primary block">SAVE PAYMENT →</button></div>`,"paymentForm")}
+  function openPrintMenu(o){
+    state.modal=`<div class="modal-backdrop"><section class="modal compact-modal"><div class="modal-head"><div><div class="kicker">${esc(o.order_no)}</div><h2>Print</h2></div><button class="x" data-action="close-modal">×</button></div><div class="print-choice-grid"><button class="print-choice" data-action="print-receipt" data-id="${o.id}">${icon("print")}<span><b>Receipt / PDF</b><small>Customer bill and QR</small></span></button>${o.pieces.length?`<button class="print-choice" data-action="print-labels" data-id="${o.id}">${icon("tag")}<span><b>Bag + garment tags</b><small>${o.pieces.length} piece${o.pieces.length===1?'':'s'}</small></span></button>`:`<div class="print-choice disabled">${icon("tag")}<span><b>Garment tags</b><small>Available after pieces are captured</small></span></div>`}</div></section></div>`;
+    renderApp();
+  }
+  function openAssign(o,kind,dispatch=false){const ds=state.data.staff.filter(s=>s.role==="delivery"&&s.active);simpleModal(dispatch?"Assign + send delivery":`Assign ${kind}`,`<div class="stack"><input type="hidden" name="order_id" value="${o.id}"><input type="hidden" name="kind" value="${kind}"><input type="hidden" name="dispatch" value="${dispatch?'true':'false'}"><label>Delivery user<select name="driver_id" required>${ds.map(d=>`<option value="${d.id}">${esc(d.display_name)}</option>`).join("")}</select></label>${dispatch?`<p class="small muted">This will assign the driver and move the order to delivery in one step.</p>`:''}<button class="btn primary block">${dispatch?'ASSIGN + SEND →':'ASSIGN →'}</button></div>`,"assignForm")}
   function openCustomer(){simpleModal("Add customer",`<div class="stack"><label>Name<input class="input" name="name" required></label><label>UAE mobile<input class="input" name="mobile" placeholder="+9715..." required></label><label>Address<textarea name="address"></textarea></label><label>Six-digit code <span class="muted">optional — generated if blank</span><input class="input" name="pin" inputmode="numeric" maxlength="6"></label><button class="btn primary block">CREATE CUSTOMER →</button></div>`,"customerForm")}
   function openStaff(staff=null){simpleModal(staff?"Edit staff":"Add staff",`<div class="stack"><input type="hidden" name="id" value="${staff?.id||''}"><label>Name<input class="input" name="display_name" value="${esc(staff?.display_name||'')}" required></label><label>Login ID<input class="input" name="login_id" value="${esc(staff?.login_id||'')}" required></label><label>Role<select name="role">${["admin","manager","delivery"].map(r=>`<option ${staff?.role===r?'selected':''}>${r}</option>`).join("")}</select></label><label>Phone<input class="input" name="phone" value="${esc(staff?.phone||'')}"></label><label>New six-digit code <span class="muted">${staff?'leave blank to keep':'generated if blank'}</span><input class="input" name="pin" inputmode="numeric" maxlength="6"></label><label class="row"><input name="active" type="checkbox" ${staff?.active===false?'':'checked'}> Active</label><button class="btn primary block">SAVE STAFF →</button></div>`,"staffForm")}
   function openRate(){simpleModal("Add / change rate",`<div class="stack"><label>Garment<select name="garment_type_id">${state.data.refs.garments.filter(x=>x.active).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label><label>Service<select name="service_id">${state.data.refs.services.filter(x=>x.active).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label><label>Price AED<input class="input" name="unit_price" type="number" min="0" step="0.01" required></label><label>Effective from<input class="input" name="effective_from" type="date" value="${new Date().toISOString().slice(0,10)}"></label><button class="btn primary block">SAVE RATE →</button></div>`,"rateForm")}
@@ -430,7 +533,7 @@
     bind("collectForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems(id("itemService").value);if(!items.length)return toast("Add at least one garment",true);doAction({action:"collect_pickup",order_id:e.target.dataset.order,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Pickup collected",e.submitter)});
     bind("deliverForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"deliver_order",order_id:e.target.dataset.order,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Delivered",e.submitter)});
     bind("paymentForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"record_payment",order_id:f.get("order_id"),amount:f.get("amount"),method:f.get("method"),context:f.get("context")},"Payment recorded",e.submitter)});
-    bind("assignForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"assign_driver",order_id:f.get("order_id"),kind:f.get("kind"),driver_id:f.get("driver_id")},"Driver assigned",e.submitter)});
+    bind("assignForm",e=>{e.preventDefault();const f=new FormData(e.target),dispatch=f.get("dispatch")==="true";doAction({action:"assign_driver",order_id:f.get("order_id"),kind:f.get("kind"),driver_id:f.get("driver_id"),dispatch},dispatch?"Driver assigned and sent":"Driver assigned",e.submitter,dispatch?"Assigning + sending…":"Assigning…")});
     bind("customerForm",async e=>{e.preventDefault();const f=new FormData(e.target);try{setBusy(true,e.submitter,"Saving customer…");const r=await api("/action",{method:"POST",body:{action:"save_customer",name:f.get("name"),mobile:f.get("mobile"),address:f.get("address"),pin:f.get("pin")||null}});state.modal=null;await refresh();if(r.temporary_pin)alert(`Customer created. Six-digit login code: ${r.temporary_pin}\nShare it privately with the customer.`);else toast("Customer saved")}catch(err){toast(err.message,true)}finally{setBusy(false)}});
     bind("staffForm",async e=>{e.preventDefault();const f=new FormData(e.target),isNew=!f.get("id");try{setBusy(true,e.submitter,"Saving staff…");const r=await api("/action",{method:"POST",body:{action:"save_staff",id:f.get("id")||null,display_name:f.get("display_name"),login_id:f.get("login_id"),role:f.get("role"),phone:f.get("phone"),pin:f.get("pin")||null,active:f.get("active")==="on"}});state.modal=null;await refresh();if(isNew&&r.temporary_pin)alert(`Staff created. Six-digit login code: ${r.temporary_pin}\nShare it privately with the staff member.`);else toast("Staff saved")}catch(err){toast(err.message,true)}finally{setBusy(false)}});
     bind("rateForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_rate",garment_type_id:f.get("garment_type_id"),service_id:f.get("service_id"),unit_price:f.get("unit_price"),effective_from:f.get("effective_from")},"Rate saved",e.submitter)});
@@ -438,6 +541,7 @@
     bind("serviceForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_service",id:f.get("id")||null,name:f.get("name"),code:f.get("code"),workflow:f.get("workflow"),active:f.get("active")==="on"},"Service saved",e.submitter)});
     bind("discountForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_discount",id:f.get("id")||null,name:f.get("name"),discount_type:f.get("discount_type"),value:f.get("value"),active:f.get("active")==="on"},"Discount saved",e.submitter)});
     bind("businessForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"save_business_settings",name:f.get("name"),address:f.get("address"),phone:f.get("phone")},"Organization updated",e.submitter,"Saving organization…")});
+    bind("reportCustomForm",e=>{e.preventDefault();const f=new FormData(e.target);state.reportFrom=f.get("from");state.reportTo=f.get("to");if(state.reportFrom>state.reportTo)return toast("From date must be before To date",true);loadReports(true)});
     bind("themeForm",e=>{e.preventDefault();const color=id("themeHex")?.value||id("themeColor")?.value; if(!/^#[0-9a-f]{6}$/i.test(color||""))return toast("Enter a valid color such as #64748B",true);applyTheme(color,true);applyMode(state.mode,true);state.modal=null;renderApp();toast("Theme updated")});
     const themeColor=id("themeColor"), themeHex=id("themeHex"); if(themeColor&&themeHex){themeColor.addEventListener("input",()=>themeHex.value=themeColor.value);themeHex.addEventListener("input",()=>{if(/^#[0-9a-f]{6}$/i.test(themeHex.value))themeColor.value=themeHex.value})}
     const service=id("itemService"); if(service) service.addEventListener("change",()=>{state.serviceId=service.value; id("itemPicker").innerHTML=itemPicker(state.serviceId,state.qty)});
@@ -469,22 +573,31 @@
     const demoBtn=e.target.closest("[data-demo]"); if(demoBtn){const [u,p]=demoBtn.dataset.demo.split("|");id("loginIdentifier").value=u;id("loginPin").value=p;return}
     const themeBtn=e.target.closest("[data-theme-color]"); if(themeBtn){applyTheme(themeBtn.dataset.themeColor,true);state.modal=themeModal();renderApp();return}
     const modeBtn=e.target.closest("[data-theme-mode]"); if(modeBtn){applyMode(modeBtn.dataset.themeMode,true);state.modal=themeModal();renderApp();return}
-    const v=e.target.closest("[data-view]")?.dataset.view;if(v){state.view=v;renderApp();return}
+    const v=e.target.closest("[data-view]")?.dataset.view;if(v){state.view=v;renderApp();if(v==="reports")loadReports(true);return}
     const q=e.target.closest("[data-qty]");if(q){const gid=q.dataset.qty,delta=Number(q.dataset.delta);state.qty[gid]=Math.max(0,Number(state.qty[gid]||0)+delta);const el=document.querySelector(`[data-qty-value="${gid}"]`);if(el)el.textContent=state.qty[gid];return}
     const tab=e.target.closest("[data-admin-tab]"); if(tab){document.querySelectorAll("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));const panel=id("adminPanel");panel.innerHTML=tab.dataset.adminTab==="business"?adminBusiness():tab.dataset.adminTab==="staff"?adminStaff():tab.dataset.adminTab==="customers"?adminCustomers():tab.dataset.adminTab==="rates"?adminRates():tab.dataset.adminTab==="catalog"?adminCatalog():adminDiscounts();bindDynamicForms();return}
     const stageFilter=e.target.closest("[data-filter-stage]");if(stageFilter){document.querySelectorAll("[data-filter-stage]").forEach(x=>x.classList.toggle("active",x===stageFilter));state.orderFilter=stageFilter.dataset.filterStage||"all";renderOrderList(state.data.actor.role!=="delivery");return}
     const orderView=e.target.closest("[data-order-view]");if(orderView){state.orderView=orderView.dataset.orderView==="detailed"?"detailed":"optimal";localStorage.setItem("laundry_order_view",state.orderView);document.querySelectorAll("[data-order-view]").forEach(x=>x.classList.toggle("active",x.dataset.orderView===state.orderView));renderOrderList(state.data.actor.role!=="delivery");return}
+    const workflow=e.target.closest("[data-workflow-mode]");if(workflow){state.workflowMode=workflow.dataset.workflowMode==="detailed"?"detailed":"quick";localStorage.setItem("laundry_workflow_mode",state.workflowMode);openOrder(workflow.dataset.id);return}
+    const reportTab=e.target.closest("[data-report-tab]");if(reportTab){state.reportTab=reportTab.dataset.reportTab;renderApp();return}
+    const reportPreset=e.target.closest("[data-report-preset]");if(reportPreset){state.reportPreset=reportPreset.dataset.reportPreset;localStorage.setItem("laundry_report_preset",state.reportPreset);if(state.reportPreset==="this_year")state.reportGroup="month";else if(state.reportPreset!=="custom")state.reportGroup="day";localStorage.setItem("laundry_report_group",state.reportGroup);renderApp();loadReports(true);return}
     const b=e.target.closest("[data-action]");if(!b)return;const a=b.dataset.action;
     if(a==="logout")return logout(true,b); if(a==="toggle-theme"){applyMode(state.mode==="graphite"?"light":"graphite",true);renderApp();return} if(a==="theme")return openTheme(); if(a==="close-modal")return closeModal();
     if(a==="open-order")return openOrder(b.dataset.id); if(a==="counter-order")return openCounter(); if(a==="pickup-request")return openPickupRequest(); if(a==="new-customer")return openCustomer();
     if(a==="collect")return openCollect(b.dataset.id); if(a==="deliver")return openDeliver(b.dataset.id);
-    if(a==="payment")return openPayment(state.data.orders.find(o=>o.id===b.dataset.id)); if(a==="assign")return openAssign(state.data.orders.find(o=>o.id===b.dataset.id),b.dataset.kind);
+    if(a==="payment")return openPayment(state.data.orders.find(o=>o.id===b.dataset.id)); if(a==="assign")return openAssign(state.data.orders.find(o=>o.id===b.dataset.id),b.dataset.kind,b.dataset.dispatch==="true"); if(a==="print-menu")return openPrintMenu(state.data.orders.find(o=>o.id===b.dataset.id));
     if(a==="advance")return doAction({action:"advance_order",order_id:b.dataset.id,target_status:b.dataset.status},`Moved to ${stageLabel(b.dataset.status)}`,b,"Updating stage…");
+    if(a==="quick-advance")return doAction({action:"quick_advance",order_id:b.dataset.id},"Order updated",b,"Updating…");
     if(a==="credit")return doAction({action:"apply_credit",order_id:b.dataset.id},"Customer credit applied",b,"Applying credit…");
     if(a==="print-receipt")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"receipt",b); if(a==="print-labels")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"labels",b); if(a==="whatsapp")return whatsapp(state.data.orders.find(o=>o.id===b.dataset.id));
     if(a==="new-staff")return openStaff(); if(a==="edit-staff")return openStaff(state.data.staff.find(s=>s.id===b.dataset.id)); if(a==="new-rate")return openRate(); if(a==="new-garment")return openCatalog("garment"); if(a==="edit-garment")return openCatalog("garment",state.data.refs.garments.find(x=>x.id===b.dataset.id)); if(a==="new-service")return openCatalog("service"); if(a==="edit-service")return openCatalog("service",state.data.refs.services.find(x=>x.id===b.dataset.id)); if(a==="new-discount")return openDiscount(); if(a==="edit-discount")return openDiscount(state.data.refs.discounts.find(x=>x.id===b.dataset.id));
     if(a==="toggle-customer")return doAction({action:"set_customer_access",customer_id:b.dataset.id,enabled:b.dataset.enabled!=="true"},"Customer access updated",b,"Updating access…");
     if(a==="reset-customer"){if(!confirm("Reset this customer's six-digit login code?"))return;try{setBusy(true,b,"Resetting code…");const r=await api("/action",{method:"POST",body:{action:"reset_customer_pin",customer_id:b.dataset.id}});await refresh();alert(`New customer code: ${r.pin}\nShare it privately with the customer.`)}catch(err){toast(err.message,true)}finally{setBusy(false)}return}
+  });
+
+  document.addEventListener("change",e=>{
+    if(e.target?.id==="reportGroup"){state.reportGroup=e.target.value;localStorage.setItem("laundry_report_group",state.reportGroup);loadReports(true)}
+    if(e.target?.id==="reportCalendarMonth"){state.reportCalendarMonth=e.target.value;loadReports(true)}
   });
 
   window.addEventListener("online",()=>{if(state.token)refresh()});
