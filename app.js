@@ -14,6 +14,8 @@
     serviceId: null,
     theme: localStorage.getItem("laundry_theme") || "#64748b",
     mode: localStorage.getItem("laundry_mode") || "graphite",
+    orderView: localStorage.getItem("laundry_order_view") || "optimal",
+    orderFilter: "all",
   };
   const app = document.getElementById("app");
   const toastEl = document.getElementById("toast");
@@ -209,7 +211,7 @@
       <header class="topbar"><div class="topbar-inner">
         <div class="brand"><div class="brand-mark">${esc(orgInitial)}</div><div class="brand-copy"><div>${esc(org.name||"Laundry Desk")}</div>${org.address?`<span>${esc(org.address)}</span>`:""}</div></div>
         <nav class="desktop-nav">${navButtons}</nav>
-        <div class="actor"><div class="actor-copy"><div class="actor-name">${esc(a.display_name)}</div><div class="actor-role">${roleName(a.role)}</div></div><button class="icon-btn" data-action="toggle-theme" aria-label="Switch to ${state.mode==='graphite'?'light':'graphite'} theme" title="Switch theme">${icon(state.mode==='graphite'?"sun":"moon")}</button><button class="icon-btn" data-action="theme" aria-label="Theme settings" title="Theme settings">${icon("palette")}</button><button class="btn ghost smallbtn" data-action="logout">${icon("logout","sm")}<span>Exit</span></button></div>
+        <div class="actor"><div class="actor-copy"><div class="actor-name">${esc(a.display_name)}</div><div class="actor-role">${roleName(a.role)}</div></div><button class="icon-btn" data-action="toggle-theme" aria-label="Switch to ${state.mode==='graphite'?'light':'graphite'} theme" title="Switch theme">${icon(state.mode==='graphite'?"sun":"moon")}</button><button class="icon-btn" data-action="theme" aria-label="Theme settings" title="Theme settings">${icon("palette")}</button><button class="btn ghost smallbtn exit-btn" data-action="logout" aria-label="Exit" title="Exit">${icon("logout","sm")}<span>Exit</span></button></div>
       </div></header>
       <main class="main">${renderView()}</main>
       <nav class="bottomnav"><div class="bottomnav-inner" style="--nav-count:${nav.length}">${navButtons}</div></nav>
@@ -238,7 +240,7 @@
     const action=role==="manager"?`<button class="btn primary" data-action="counter-order">${icon("plus","sm")}New counter order</button>`:"";
     return `${titleBlock("Today","Operations","What needs attention now.",action)}
       <div class="grid metrics">${metric("Active orders",s.active_orders,true)}${metric("Outstanding",fmt(s.outstanding))}${metric("Collected",fmt(s.payments_received))}${metric("Customer credit",fmt(s.customer_credits))}</div>
-      <section class="section"><div class="section-head"><div><h2>Needs attention</h2><p class="sub small">Pickup requests and orders ready to hand over.</p></div></div>${urgent.length?`<div class="grid cards">${urgent.map(orderCard).join("")}</div>`:`<div class="empty">You are up to date. No urgent work right now.</div>`}</section>
+      <section class="section"><div class="section-head"><div><h2>Needs attention</h2><p class="sub small">Pickup requests and orders ready to hand over.</p></div></div>${urgent.length?`<div class="grid cards">${urgent.map(o=>orderCard(o,"optimal")).join("")}</div>`:`<div class="empty">You are up to date. No urgent work right now.</div>`}</section>
       <section class="section"><div class="section-head"><div><h2>Work by stage</h2></div></div><div class="queue-strip">${STAGES.filter(([k])=>k!=="delivered").map(([k,l])=>`<div class="queue-chip"><b>${s.stage_counts[k]||0}</b><span>${l}</span></div>`).join("")}</div></section>`;
   }
 
@@ -246,23 +248,49 @@
     const orders=state.data.orders, active=orders.filter(o=>o.laundry_status!=="delivered"), credit=orders[0]?.customer_credit||0, out=orders.reduce((s,o)=>s+Number(o.outstanding),0);
     return `${titleBlock("My laundry",`Hello, ${esc(state.data.actor.display_name.split(" ")[0])}`,"Everything about your laundry in one place.",`<button class="btn primary" data-view="pickup">${icon("pickup","sm")}Request pickup</button>`)}
       <div class="grid metrics">${metric("Active",active.length,true)}${metric("Amount due",fmt(out))}${metric("Credit",fmt(credit))}${metric("Total orders",orders.length)}</div>
-      <section class="section"><div class="section-head"><div><h2>In progress</h2></div></div>${active.length?`<div class="grid cards">${active.map(orderCard).join("")}</div>`:`<div class="empty">No active orders. Request a pickup whenever you are ready.</div>`}</section>`;
+      <section class="section"><div class="section-head"><div><h2>In progress</h2></div></div>${active.length?`<div class="grid cards">${active.map(o=>orderCard(o,"optimal")).join("")}</div>`:`<div class="empty">No active orders. Request a pickup whenever you are ready.</div>`}</section>`;
   }
 
-  function orderCard(o){
+  function orderCard(o, mode=state.orderView){
     const pieces=o.items.reduce((sum,x)=>sum+Number(x.quantity),0);
-    return `<article class="card order" data-order-card="${o.id}"><div class="order-head"><div><div class="order-no">${esc(o.order_no)}</div><div class="small muted">${esc(o.customer?.name||"")}${pieces?` · ${pieces} pcs`:""}</div></div><div class="money">${fmt(o.total)}</div></div>
-      <div class="order-meta"><span class="stage active">${stageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
-      <div class="order-money"><div><span>Paid</span><b>${fmt(o.paid)}</b></div><div><span>Due</span><b>${fmt(o.outstanding)}</b></div>${o.customer_credit>0?`<div><span>Credit</span><b>${fmt(o.customer_credit)}</b></div>`:""}<div><span>Type</span><b>${o.channel==="counter"?"Counter":"Pickup"}</b></div></div>
-      <button class="btn block" data-action="open-order" data-id="${o.id}">View order</button></article>`;
+    const paymentLabel=o.outstanding>0?`Due ${fmt(o.outstanding)}`:(o.payment_status==="unpriced"?"Not priced":"Paid");
+    if(mode==="detailed"){
+      return `<article class="card order order-detailed" data-order-card="${o.id}"><div class="order-head"><div><div class="order-no">${esc(o.order_no)}</div><div class="small muted">${esc(o.customer?.name||"")}${pieces?` · ${pieces} pcs`:""}</div></div><div class="money">${fmt(o.total)}</div></div>
+        <div class="order-meta"><span class="stage active">${stageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
+        <div class="order-money"><div><span>Paid</span><b>${fmt(o.paid)}</b></div><div><span>Due</span><b>${fmt(o.outstanding)}</b></div>${o.customer_credit>0?`<div><span>Credit</span><b>${fmt(o.customer_credit)}</b></div>`:""}<div><span>Type</span><b>${o.channel==="counter"?"Counter":"Pickup"}</b></div></div>
+        <button class="btn block" data-action="open-order" data-id="${o.id}">Details</button></article>`;
+    }
+    return `<article class="card order order-optimal" data-order-card="${o.id}">
+      <div class="order-optimal-main"><div class="order-no">${esc(o.order_no)}</div><div class="order-customer">${esc(o.customer?.name||"")}${pieces?` · ${pieces} pcs`:""}</div></div>
+      <div class="order-optimal-status"><span class="stage active">${stageLabel(o.laundry_status)}</span><span class="badge ${o.payment_status}">${o.payment_status}</span></div>
+      <div class="order-optimal-money"><span>${paymentLabel}</span><b>${fmt(o.total)}</b></div>
+      <button class="btn smallbtn order-details-btn" data-action="open-order" data-id="${o.id}" aria-label="Open ${esc(o.order_no)} details">Details</button>
+    </article>`;
+  }
+
+  function visibleOrders(includeDelivered=true){
+    let orders=state.data.orders||[];
+    if(!includeDelivered) orders=orders.filter(o=>o.laundry_status!=="delivered");
+    if(state.orderFilter!=="all") orders=orders.filter(o=>o.laundry_status===state.orderFilter);
+    return orders;
+  }
+
+  function renderOrderList(includeDelivered=true){
+    const orders=visibleOrders(includeDelivered);
+    const list=id("orderList");
+    if(!list)return;
+    list.className=state.orderView==="detailed"?"grid cards order-list detailed-view":"order-list optimal-view";
+    list.innerHTML=orders.length?orders.map(o=>orderCard(o,state.orderView)).join(""):`<div class="empty">No orders in this view.</div>`;
   }
 
   function ordersView(includeDelivered=true){
+    state.orderFilter="all";
     let orders=state.data.orders||[];
     if(!includeDelivered) orders=orders.filter(o=>o.laundry_status!=="delivered");
-    return `${titleBlock("All work","Orders",`${orders.length} visible to your account.`,state.data.actor.role==="manager"?`<button class="btn primary" data-action="counter-order">+ New</button>`:"")}
-      <div class="tabs">${[["all","All"],...STAGES].map(([s,l])=>`<button class="tab ${s==="all"?'active':''}" data-filter-stage="${s}">${l}</button>`).join("")}</div>
-      <div id="orderList" class="grid cards">${orders.length?orders.map(orderCard).join(""):`<div class="empty">No orders.</div>`}</div>`;
+    const create=state.data.actor.role==="manager"?`<button class="btn primary" data-action="counter-order">+ New</button>`:"";
+    return `${titleBlock("All work","Orders",`${orders.length} visible to your account.`,create)}
+      <div class="orders-toolbar"><div class="tabs order-stage-tabs">${[["all","All"],...STAGES].map(([s,l])=>`<button class="tab ${s==="all"?'active':''}" data-filter-stage="${s}">${l}</button>`).join("")}</div><div class="view-switch" aria-label="Order view"><button class="view-switch-btn ${state.orderView==="optimal"?'active':''}" data-order-view="optimal">Optimal</button><button class="view-switch-btn ${state.orderView==="detailed"?'active':''}" data-order-view="detailed">Detailed</button></div></div>
+      <div id="orderList" class="${state.orderView==="detailed"?'grid cards order-list detailed-view':'order-list optimal-view'}">${orders.length?orders.map(o=>orderCard(o,state.orderView)).join(""):`<div class="empty">No orders.</div>`}</div>`;
   }
 
   function newView(){
@@ -278,11 +306,11 @@
     const other=state.data.orders.filter(o=>!["pickup_requested","out_for_delivery","delivered"].includes(o.laundry_status));
     return `${titleBlock("Assigned only","My stops","No customer list. No unassigned work.")}
       <div class="grid metrics">${metric("Pickups",pickups.length,true)}${metric("Deliveries",deliveries.length,true)}${metric("In laundry",other.length)}${metric("Total assigned",state.data.orders.filter(o=>o.laundry_status!=="delivered").length)}</div>
-      <section class="section"><div class="kicker">Collect</div><h2>Pickup stops</h2>${pickups.length?`<div class="grid cards">${pickups.map(orderCard).join("")}</div>`:`<div class="empty">No pickup stops assigned.</div>`}</section>
-      <section class="section"><div class="kicker">Hand over</div><h2>Delivery stops</h2>${deliveries.length?`<div class="grid cards">${deliveries.map(orderCard).join("")}</div>`:`<div class="empty">No deliveries assigned.</div>`}</section>`;
+      <section class="section"><div class="kicker">Collect</div><h2>Pickup stops</h2>${pickups.length?`<div class="grid cards">${pickups.map(o=>orderCard(o,"optimal")).join("")}</div>`:`<div class="empty">No pickup stops assigned.</div>`}</section>
+      <section class="section"><div class="kicker">Hand over</div><h2>Delivery stops</h2>${deliveries.length?`<div class="grid cards">${deliveries.map(o=>orderCard(o,"optimal")).join("")}</div>`:`<div class="empty">No deliveries assigned.</div>`}</section>`;
   }
 
-  function historyView(){const done=state.data.orders.filter(o=>o.laundry_status==="delivered");return `${titleBlock("Completed","History",`${done.length} delivered orders assigned to you.`)}${done.length?`<div class="grid cards">${done.map(orderCard).join("")}</div>`:`<div class="empty">No completed deliveries yet.</div>`}`}
+  function historyView(){const done=state.data.orders.filter(o=>o.laundry_status==="delivered");return `${titleBlock("Completed","History",`${done.length} delivered orders assigned to you.`)}${done.length?`<div class="grid cards">${done.map(o=>orderCard(o,"optimal")).join("")}</div>`:`<div class="empty">No completed deliveries yet.</div>`}`}
   function accountView(){const a=state.data.actor; return `${titleBlock("Account","${esc(a.display_name)}",roleName(a.role))}<div class="grid cards"><div class="card stack"><div><div class="kicker">Role</div><div class="strong">${roleName(a.role)}</div></div>${a.mobile?`<div><div class="kicker">Mobile</div><div class="strong">${esc(a.mobile)}</div></div>`:""}${a.customer_code?`<div><div class="kicker">Customer code</div><div class="mono strong">${esc(a.customer_code)}</div></div>`:""}</div><div class="card stack"><div><div class="kicker">Appearance</div><h3>Theme</h3><p class="small muted">Switch Graphite / Light and optionally adjust the accent.</p></div><button class="btn" data-action="theme">${icon("palette","sm")}Change theme</button><button class="btn danger" data-action="logout">Sign out</button></div></div>`}
   function customerPickup(){return `${titleBlock("Doorstep","Request pickup","One request. Staff will assign the driver.")}<form id="pickupSelfForm" class="card stack"><label>Pickup address<textarea name="address" required>${esc(state.data.actor.address||"")}</textarea></label><label>Note <textarea name="note" placeholder="Building, flat, preferred time..."></textarea></label><button class="btn primary block">REQUEST PICKUP →</button></form>`}
 
@@ -291,7 +319,7 @@
     return `${titleBlock("Simple numbers","Reports","Operational and payment status stay separate.")}
       <div class="grid metrics">${metric("Active orders",s.active_orders,true)}${metric("Outstanding",fmt(s.outstanding))}${metric("Payments received",fmt(s.payments_received))}${metric("Customer credits",fmt(s.customer_credits))}</div>
       <section class="section"><h2>Stage queue</h2><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Count</th></tr></thead><tbody>${STAGES.map(([k,l])=>`<tr><td>${l}</td><td class="strong">${s.stage_counts[k]||0}</td></tr>`).join("")}</tbody></table></div></section>
-      <section class="section"><h2>Outstanding orders</h2><div class="grid cards">${state.data.orders.filter(o=>o.outstanding>0).slice(0,12).map(orderCard).join("")||`<div class="empty">No outstanding balances.</div>`}</div></section>`;
+      <section class="section"><h2>Outstanding orders</h2><div class="grid cards">${state.data.orders.filter(o=>o.outstanding>0).slice(0,12).map(o=>orderCard(o,"optimal")).join("")||`<div class="empty">No outstanding balances.</div>`}</div></section>`;
   }
 
   function adminView(){
@@ -444,7 +472,8 @@
     const v=e.target.closest("[data-view]")?.dataset.view;if(v){state.view=v;renderApp();return}
     const q=e.target.closest("[data-qty]");if(q){const gid=q.dataset.qty,delta=Number(q.dataset.delta);state.qty[gid]=Math.max(0,Number(state.qty[gid]||0)+delta);const el=document.querySelector(`[data-qty-value="${gid}"]`);if(el)el.textContent=state.qty[gid];return}
     const tab=e.target.closest("[data-admin-tab]"); if(tab){document.querySelectorAll("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));const panel=id("adminPanel");panel.innerHTML=tab.dataset.adminTab==="business"?adminBusiness():tab.dataset.adminTab==="staff"?adminStaff():tab.dataset.adminTab==="customers"?adminCustomers():tab.dataset.adminTab==="rates"?adminRates():tab.dataset.adminTab==="catalog"?adminCatalog():adminDiscounts();bindDynamicForms();return}
-    const stageFilter=e.target.closest("[data-filter-stage]");if(stageFilter){document.querySelectorAll("[data-filter-stage]").forEach(x=>x.classList.toggle("active",x===stageFilter));let os=state.data.orders;if(stageFilter.dataset.filterStage!=="all")os=os.filter(o=>o.laundry_status===stageFilter.dataset.filterStage);id("orderList").innerHTML=os.length?os.map(orderCard).join(""):`<div class="empty">No orders in this stage.</div>`;return}
+    const stageFilter=e.target.closest("[data-filter-stage]");if(stageFilter){document.querySelectorAll("[data-filter-stage]").forEach(x=>x.classList.toggle("active",x===stageFilter));state.orderFilter=stageFilter.dataset.filterStage||"all";renderOrderList(state.data.actor.role!=="delivery");return}
+    const orderView=e.target.closest("[data-order-view]");if(orderView){state.orderView=orderView.dataset.orderView==="detailed"?"detailed":"optimal";localStorage.setItem("laundry_order_view",state.orderView);document.querySelectorAll("[data-order-view]").forEach(x=>x.classList.toggle("active",x.dataset.orderView===state.orderView));renderOrderList(state.data.actor.role!=="delivery");return}
     const b=e.target.closest("[data-action]");if(!b)return;const a=b.dataset.action;
     if(a==="logout")return logout(true,b); if(a==="toggle-theme"){applyMode(state.mode==="graphite"?"light":"graphite",true);renderApp();return} if(a==="theme")return openTheme(); if(a==="close-modal")return closeModal();
     if(a==="open-order")return openOrder(b.dataset.id); if(a==="counter-order")return openCounter(); if(a==="pickup-request")return openPickupRequest(); if(a==="new-customer")return openCustomer();
