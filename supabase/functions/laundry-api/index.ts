@@ -372,7 +372,7 @@ async function buildReports(actor, params) {
   const cy = Number(calendarMonth.slice(0, 4));
   const nextY = cm === 12 ? cy + 1 : cy;
   const nextM = cm === 12 ? 1 : cm + 1;
-  const calTo = new Date(`${nextY}-${String(nextM).padStart(2, "0")}-01T00:00:00+04:00`).getTime() - 1;
+  const calTo = new Date(new Date(`${nextY}-${String(nextM).padStart(2, "0")}-01T00:00:00+04:00`).getTime() - 1);
 
   const currentOrders = await fetchPaged(
     "laundry_orders",
@@ -855,7 +855,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && (path === "/" || path === "/health")) {
-      return json({ ok: true, service: "laundry-api", version: "1.2.0", time: new Date().toISOString() });
+      return json({ ok: true, service: "laundry-api", version: "1.2.1", time: new Date().toISOString() });
     }
 
     if (req.method === "POST" && path === "/login") {

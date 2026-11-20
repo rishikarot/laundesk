@@ -218,3 +218,8 @@ html[data-theme="graphite"] .order-action:hover{border-color:#59616a}
 @media(min-width:720px){.report-controls{grid-template-columns:minmax(0,1fr) auto;align-items:start}.report-custom{grid-column:1/-1}.report-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.report-breakdown{grid-template-columns:repeat(4,minmax(0,1fr))}.calendar-cell{min-height:118px;padding:9px}.calendar-day{font-size:12px}.calendar-stat,.calendar-income{font-size:10px}}
 @media(max-width:719px){.workflow-mode{width:100%;display:grid;grid-template-columns:1fr 1fr}.workflow-mode button{width:100%}.quick-stagebar{gap:5px}.quick-stagebar .stage{font-size:9px;padding:4px 7px}.report-options{justify-content:flex-start}.report-custom{grid-template-columns:1fr 1fr}.report-custom .btn{grid-column:1/-1;width:100%}.report-section-head{align-items:flex-start}.report-note{display:none}.calendar-weekdays,.calendar-grid{gap:4px}.calendar-cell{min-height:78px;padding:5px;border-radius:8px}.calendar-stat{font-size:8px}.calendar-income{font-size:8px}.calendar-month{width:145px}.bottomnav-inner{padding-inline:4px}.navbtn{font-size:9px}.navbtn .icon{width:18px;height:18px}}
 @media(max-width:420px){.calendar-cell{min-height:68px}.calendar-stat span{display:none}.calendar-income{font-size:7.5px}.report-metrics .metric{min-height:72px}.report-metrics .metric .value{font-size:17px}}
+
+.account-grid{align-items:start}
+.account-grid>.card{align-self:start}
+.qty-row.disabled-row{opacity:.56}
+.qty-row.disabled-row .stepper button:disabled{cursor:not-allowed;opacity:.45}

@@ -8,7 +8,7 @@ Upload these files to the repository root:
 - config.js
 - HOW_TO_USE.html
 
-The existing Supabase project is already configured. The `laundry-api` Edge Function is deployed as v4.
+The existing Supabase project is already configured. The `laundry-api` Edge Function is deployed as v6.
 
 ## Workflow
 Default Quick Flow:
