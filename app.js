@@ -399,13 +399,48 @@
   }
 
   let xlsxLoader=null,pdfLoader=null;
-  function loadScriptOnce(src,test){if(test())return Promise.resolve();return new Promise((resolve,reject)=>{const existing=[...document.scripts].find(x=>x.src===src);if(existing){existing.addEventListener("load",resolve,{once:true});existing.addEventListener("error",()=>reject(new Error("Could not load export library")),{once:true});return}const sc=document.createElement("script");sc.src=src;sc.async=true;sc.onload=resolve;sc.onerror=()=>reject(new Error("Could not load export library"));document.head.appendChild(sc)})}
-  function ensureXLSX(){if(window.XLSX)return Promise.resolve();if(!xlsxLoader)xlsxLoader=loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",()=>!!window.XLSX);return xlsxLoader}
-  async function ensurePDF(){if(window.jspdf?.jsPDF&&window.jspdf.jsPDF.API.autoTable)return;if(!pdfLoader)pdfLoader=(async()=>{await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js",()=>!!window.jspdf?.jsPDF);await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js",()=>!!window.jspdf?.jsPDF?.API?.autoTable)})();return pdfLoader}
+  function loadScriptOnce(src,test,label="export library"){
+    if(test())return Promise.resolve();
+    return new Promise((resolve,reject)=>{
+      const stale=[...document.scripts].find(x=>x.src===src);
+      if(stale)stale.remove();
+      const sc=document.createElement("script");
+      sc.src=src;sc.async=true;sc.crossOrigin="anonymous";
+      const timer=setTimeout(()=>{sc.remove();reject(new Error(`${label} timed out while loading`))},12000);
+      sc.onload=()=>{clearTimeout(timer);if(test())resolve();else{sc.remove();reject(new Error(`${label} loaded but did not initialize`))}};
+      sc.onerror=()=>{clearTimeout(timer);sc.remove();reject(new Error(`${label} could not be loaded`))};
+      document.head.appendChild(sc);
+    })
+  }
+  async function loadScriptFallback(urls,test,label){
+    if(test())return;
+    let lastError=null;
+    for(const src of urls){
+      try{await loadScriptOnce(src,test,label);if(test())return}catch(e){lastError=e}
+    }
+    throw new Error(`${label} could not be loaded. Check the internet connection and try again.${lastError?.message?` (${lastError.message})`:""}`)
+  }
+  function ensureXLSX(){if(window.XLSX)return Promise.resolve();if(!xlsxLoader)xlsxLoader=loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",()=>!!window.XLSX,"Excel export library").catch(e=>{xlsxLoader=null;throw e});return xlsxLoader}
+  async function ensurePDF(){
+    const hasJsPDF=()=>!!window.jspdf?.jsPDF;
+    const hasAutoTable=()=>typeof window.jspdf?.jsPDF?.API?.autoTable==="function";
+    if(hasJsPDF()&&hasAutoTable())return;
+    if(!pdfLoader)pdfLoader=(async()=>{
+      await loadScriptFallback([
+        "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.0/jspdf.umd.min.js",
+        "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+      ],hasJsPDF,"PDF export library");
+      await loadScriptFallback([
+        "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js",
+        "https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"
+      ],hasAutoTable,"PDF table library");
+    })().catch(e=>{pdfLoader=null;throw e});
+    return pdfLoader;
+  }
   function reportFilename(ext){const r=reportRange(),tab=(state.reportTab||"overview").replace(/[^a-z0-9]+/gi,"-");return `Laundry-Desk-${tab}-${r.from}-to-${r.to}.${ext}`}
   function reportExportModel(){const r=state.reportData,role=state.data.actor.role,range=reportRange();if(!r)return null;const sections=[];if(state.reportTab==="customers"){sections.push({title:"Customer-wise business",headers:["Customer","Code","Orders","Pieces","Sales","Received","Outstanding","Credit","Net position"],rows:(r.customers||[]).map(c=>[c.name,c.customer_code,c.orders,c.pieces,c.sales,c.payments_received,c.outstanding,c.credit,c.net_position])})}else if(state.reportTab==="operations"){sections.push({title:"Current quick workflow",headers:["Stage","Count"],rows:Object.entries(r.current?.quick_stage_counts||{}).map(([k,v])=>[k.replaceAll("_"," "),v])});sections.push({title:"Operational exceptions",headers:["Metric","Count"],rows:[["Collected >12h",r.current?.aging?.collected_over_12h||0],["In progress >48h",r.current?.aging?.in_progress_over_48h||0],["Ready >24h",r.current?.aging?.ready_over_24h||0]]})}else if(state.reportTab==="payments"){sections.push({title:"Payment summary",headers:["Metric","AED"],rows:[[role==="delivery"?"Collected by me":"Cash received",r.period?.payments_received||0],["Outstanding now",r.current?.outstanding||0],["Customer credit",r.current?.customer_credit||0],["Credit added",r.period?.credit_added||0],["Credit applied",r.period?.credit_applied||0]]});sections.push({title:"By method",headers:["Method","AED"],rows:Object.entries(r.breakdowns?.payment_method||{})});sections.push({title:"By collection point",headers:["Point","AED"],rows:Object.entries(r.breakdowns?.payment_context||{})})}else if(state.reportTab==="calendar"){sections.push({title:`Calendar ${r.range?.calendar_month||state.reportCalendarMonth}`,headers:["Date","Orders","Pieces","Sales","Received","Collected","Delivered"],rows:(r.calendar||[]).map(x=>[x.date,x.orders||0,x.pieces||0,x.sales||0,x.payments_received||0,x.collected||0,x.delivered||0])})}else{sections.push({title:"Period activity",headers:["Metric","Value"],rows:[["Orders",r.period?.orders||0],["Pieces",r.period?.pieces||0],["Sales",r.period?.sales||0],["Cash received",r.period?.payments_received||0],["Collected",r.period?.collected||0],["Delivered",r.period?.delivered||0],["Average order value",r.period?.avg_order_value||0]]});sections.push({title:"Current position",headers:["Metric","Value"],rows:[["Active orders",r.current?.active_orders||0],["Outstanding",r.current?.outstanding||0],["Customer credit",r.current?.customer_credit||0],["In progress",r.current?.quick_stage_counts?.in_progress||0],["Ready",r.current?.quick_stage_counts?.ready||0]]});sections.push({title:"Trend",headers:["Period","Orders","Pieces","Sales","Received","Collected","Delivered"],rows:(r.series||[]).map(x=>[x.key,x.orders,x.pieces,x.sales,x.payments_received,x.collected,x.delivered])})}return {title:`${business().name||"Laundry Desk"} — ${state.reportTab||"Overview"} report`,subtitle:`${range.label} · ${range.from} to ${range.to}`,sections}}
   async function exportExcel(trigger){const model=reportExportModel();if(!model)return toast("Load a report first",true);try{setBusy(true,trigger,"Preparing Excel…");await ensureXLSX();const wb=XLSX.utils.book_new();for(const sec of model.sections){const data=[[sec.title],[model.subtitle],[],sec.headers,...sec.rows];const ws=XLSX.utils.aoa_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,sec.title.slice(0,31).replace(/[\/:?*\[\]]/g," ")||"Report")}XLSX.writeFile(wb,reportFilename("xlsx"));toast("Excel downloaded")}catch(e){toast(e.message,true)}finally{setBusy(false)}}
-  async function exportPDF(trigger){const model=reportExportModel();if(!model)return toast("Load a report first",true);try{setBusy(true,trigger,"Preparing PDF…");await ensurePDF();const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:"landscape",unit:"pt",format:"a4"});let y=42;doc.setFontSize(16);doc.text(model.title,40,y);y+=20;doc.setFontSize(9);doc.text(model.subtitle,40,y);y+=16;for(const sec of model.sections){doc.setFontSize(11);doc.text(sec.title,40,y);y+=8;doc.autoTable({startY:y,head:[sec.headers],body:sec.rows,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[45,48,52]},margin:{left:40,right:40}});y=doc.lastAutoTable.finalY+20;if(y>520){doc.addPage();y=42}}doc.save(reportFilename("pdf"));toast("PDF downloaded")}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+  async function exportPDF(trigger){const model=reportExportModel();if(!model)return toast("Load a report first",true);try{setBusy(true,trigger,"Preparing PDF…");await ensurePDF();const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:"landscape",unit:"pt",format:"a4"});let y=42;doc.setFontSize(16);doc.text(model.title,40,y);y+=20;doc.setFontSize(9);doc.text(model.subtitle,40,y);y+=16;for(const sec of model.sections){if(y>500){doc.addPage();y=42}doc.setFontSize(11);doc.text(sec.title,40,y);y+=8;doc.autoTable({startY:y,head:[sec.headers],body:sec.rows,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[45,48,52]},margin:{left:40,right:40}});y=(doc.lastAutoTable?.finalY||y)+20}doc.save(reportFilename("pdf"));toast("PDF downloaded")}catch(e){console.error("PDF export failed",e);toast(e?.message||"Could not create PDF. Please try again.",true)}finally{setBusy(false)}}
 
   function reportsView(){
     const role=state.data.actor.role,tabs=reportTabs(role),range=reportRange();if(!tabs.some(([k])=>k===state.reportTab))state.reportTab=tabs[0][0];
