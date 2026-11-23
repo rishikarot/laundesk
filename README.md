@@ -53,3 +53,14 @@ Admin can open **Setup → System → Reset demo data** to clear operational tes
 The reset clears orders, order items, garment tags, workflow events, payments, customer credit ledger entries, login-attempt noise and prior Laundry Desk audit entries. It resets the demo order number sequence.
 
 It retains staff users, customer accounts and login codes, organization settings, garments, services, rates and discounts. The current Admin session is retained, so testing can continue immediately after reset.
+
+
+## Option A — Mixed-Service Collection & Customer Wallet
+
+- Service-first garment collection: Wash Only, Wash + Iron, Iron Only and Dry Clean can be mixed in one order.
+- Manager/Admin Home includes Counter Order, Pickup Request and Add Customer quick actions.
+- Orders expose a direct Pay action for outstanding balances.
+- Customer Account supports payments even without outstanding dues; excess becomes advance credit.
+- Customer payments settle oldest outstanding orders first and keep only the excess as advance.
+- Existing advance is auto-applied to newly priced orders and recorded as debit/credit ledger entries.
+- Backend: Supabase `laundry-api` API v1.4.0.

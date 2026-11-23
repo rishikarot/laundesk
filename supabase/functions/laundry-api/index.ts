@@ -163,13 +163,25 @@ async function fetchOrders(actor, refs) {
   });
 }
 
+function workflowProfile(order) {
+  const workflows = new Set((order.items || []).map((x) => x.service?.workflow).filter(Boolean));
+  const hasGeneric = [...workflows].some((x) => ["dry_clean", "custom"].includes(x));
+  const needsWash = workflows.has("wash_iron") || workflows.has("wash_only");
+  const needsIron = workflows.has("wash_iron") || workflows.has("iron_only");
+  if (!workflows.size || hasGeneric) return { first: "processing", afterWash: "ready", generic: true };
+  if (needsWash) return { first: "washing", afterWash: needsIron ? "ironing" : "ready", generic: false };
+  if (needsIron) return { first: "ironing", afterWash: "ready", generic: false };
+  return { first: "processing", afterWash: "ready", generic: true };
+}
+
 function allowedNext(order) {
-  const ironOnly = order.items?.length > 0 && order.items.every((x) => x.service?.workflow === "iron_only");
+  const profile = workflowProfile(order);
   const map = {
     pickup_requested: ["collected"],
     collected: ["received"],
-    received: [ironOnly ? "ironing" : "washing"],
-    washing: ["ironing"],
+    received: [profile.first],
+    processing: ["ready"],
+    washing: [profile.afterWash],
     ironing: ["ready"],
     ready: [order.channel === "counter" ? "delivered" : "out_for_delivery"],
     out_for_delivery: ["delivered"],
@@ -199,6 +211,19 @@ async function buildBootstrap(actor) {
   let outstanding = 0;
   let payments_received = 0;
   const customerCredits = {};
+  let summaryCredit = 0;
+  let summaryAdvanceReceived = 0;
+  if (actor.actor_type === "customer") {
+    const { data, error } = await db.from("laundry_credit_ledger").select("amount,entry_type").eq("customer_id", actor.id);
+    if (error) throw error;
+    summaryCredit = money((data || []).reduce((sum, x) => sum + Number(x.amount || 0), 0));
+    summaryAdvanceReceived = money((data || []).filter((x) => x.entry_type === "advance" && Number(x.amount) > 0).reduce((sum, x) => sum + Number(x.amount || 0), 0));
+  } else if (actor.actor_type === "staff" && ["admin", "manager"].includes(actor.role)) {
+    const { data, error } = await db.from("laundry_credit_ledger").select("amount,entry_type");
+    if (error) throw error;
+    summaryCredit = money((data || []).reduce((sum, x) => sum + Number(x.amount || 0), 0));
+    summaryAdvanceReceived = money((data || []).filter((x) => x.entry_type === "advance" && Number(x.amount) > 0).reduce((sum, x) => sum + Number(x.amount || 0), 0));
+  }
   for (const o of orders) {
     stage_counts[o.laundry_status] = (stage_counts[o.laundry_status] || 0) + 1;
     outstanding += Number(o.outstanding);
@@ -217,8 +242,8 @@ async function buildBootstrap(actor) {
     summary: {
       stage_counts,
       outstanding: money(outstanding),
-      payments_received: money(payments_received),
-      customer_credits: money(Object.values(customerCredits).reduce((s, n) => s + Number(n), 0)),
+      payments_received: money(payments_received + summaryAdvanceReceived),
+      customer_credits: summaryCredit || money(Object.values(customerCredits).reduce((s, n) => s + Number(n), 0)),
       active_orders: orders.filter((o) => o.laundry_status !== "delivered").length,
     },
   };
@@ -276,9 +301,66 @@ async function recordPayment(orderId, actor, payload) {
   return data?.[0] || null;
 }
 
+async function applyAvailableCredit(orderId, actor) {
+  if (actor.actor_type !== "staff") return null;
+  const order = await orderForAction(orderId);
+  if (!(Number(order.customer_credit || 0) > 0) || !(Number(order.outstanding || 0) > 0)) return null;
+  const { data, error } = await db.rpc("laundry_apply_credit_tx", {
+    p_order_id: orderId,
+    p_collected_by: actor.id,
+    p_amount: null,
+  });
+  if (error) throw error;
+  const result = data?.[0] || null;
+  if (result) await audit(actor, "customer_credit_auto_applied", "order", orderId, result);
+  return result;
+}
+
+async function customerFinance(actor, customerId) {
+  if (actor.actor_type === "customer") {
+    if (actor.id !== customerId) throw new Error("PERMISSION:You can only view your own account");
+  } else {
+    requireRole(actor, ["admin", "manager"]);
+  }
+  const { data: customer, error: customerError } = await db
+    .from("laundry_customers")
+    .select("id,customer_code,name,mobile,address,access_enabled")
+    .eq("id", customerId)
+    .maybeSingle();
+  if (customerError || !customer) throw new Error("Customer not found");
+
+  const [ordersR, paymentsR, creditsR] = await Promise.all([
+    db.from("laundry_orders").select("id,order_no,total,laundry_status,created_at").eq("customer_id", customerId).order("created_at", { ascending: false }),
+    db.from("laundry_payments").select("id,order_id,amount,received_amount,method,payment_context,note,created_at").eq("customer_id", customerId).order("created_at", { ascending: false }),
+    db.from("laundry_credit_ledger").select("id,order_id,payment_id,amount,entry_type,note,method,reference_no,created_at").eq("customer_id", customerId).order("created_at", { ascending: true }),
+  ]);
+  for (const r of [ordersR, paymentsR, creditsR]) if (r.error) throw r.error;
+
+  const appliedByOrder = {};
+  for (const p of paymentsR.data || []) appliedByOrder[p.order_id] = money((appliedByOrder[p.order_id] || 0) + Number(p.amount || 0));
+  let outstanding = 0;
+  for (const o of ordersR.data || []) outstanding += Math.max(0, Number(o.total || 0) - Number(appliedByOrder[o.id] || 0));
+
+  let running = 0;
+  const wallet = (creditsR.data || []).map((c) => {
+    running = money(running + Number(c.amount || 0));
+    return { ...c, balance_after: running };
+  }).reverse();
+  const credit = money(running);
+  const receipts = (paymentsR.data || []).filter((p) => Number(p.received_amount || 0) > 0);
+  return {
+    customer,
+    outstanding: money(outstanding),
+    credit,
+    net_position: money(outstanding - credit),
+    wallet,
+    receipts,
+  };
+}
+
 
 function quickStage(status) {
-  if (["washing", "ironing"].includes(status)) return "in_progress";
+  if (["processing", "washing", "ironing"].includes(status)) return "in_progress";
   if (["ready", "out_for_delivery"].includes(status)) return "ready";
   return status;
 }
@@ -394,13 +476,11 @@ async function buildReports(actor, params) {
 
   let credits = [];
   if (actor.actor_type === "customer") {
-    credits = await fetchPaged("laundry_credit_ledger", "id,customer_id,order_id,amount,entry_type,created_at", (q) => q.eq("customer_id", actor.id).order("created_at", { ascending: false }));
+    credits = await fetchPaged("laundry_credit_ledger", "id,customer_id,order_id,amount,entry_type,method,reference_no,created_at", (q) => q.eq("customer_id", actor.id).order("created_at", { ascending: false }));
   } else if (actor.actor_type === "staff" && actor.role === "delivery") {
     credits = [];
   } else {
-    credits = await fetchPaged("laundry_credit_ledger", "id,customer_id,order_id,amount,entry_type,created_at", (q) => q.order("created_at", { ascending: false }));
-    const customerSet = new Set(scopedCustomerIds);
-    credits = credits.filter((c) => customerSet.has(c.customer_id));
+    credits = await fetchPaged("laundry_credit_ledger", "id,customer_id,order_id,amount,entry_type,method,reference_no,created_at", (q) => q.order("created_at", { ascending: false }));
   }
 
   let events = await fetchPaged("laundry_order_events", "id,order_id,to_status,actor_id,created_at", (q) => {
@@ -450,7 +530,7 @@ async function buildReports(actor, params) {
     current.quick_stage_counts[q] = (current.quick_stage_counts[q] || 0) + 1;
     const ageHours = (now - new Date(o.updated_at || o.created_at).getTime()) / 3600000;
     if (o.laundry_status === "collected" && ageHours > 12) current.aging.collected_over_12h += 1;
-    if (["washing", "ironing"].includes(o.laundry_status) && ageHours > 48) current.aging.in_progress_over_48h += 1;
+    if (["processing", "washing", "ironing"].includes(o.laundry_status) && ageHours > 48) current.aging.in_progress_over_48h += 1;
     if (["ready", "out_for_delivery"].includes(o.laundry_status) && ageHours > 24) current.aging.ready_over_24h += 1;
   }
   current.outstanding = money(current.outstanding);
@@ -459,7 +539,10 @@ async function buildReports(actor, params) {
     orders: periodOrders.length,
     pieces: items.reduce((s, i) => s + Number(i.quantity || 0), 0),
     sales: money(periodOrders.reduce((s, o) => s + Number(o.total || 0), 0)),
-    payments_received: money(periodPayments.reduce((s, p) => s + Number(p.received_amount || 0), 0)),
+    payments_received: money(
+      periodPayments.reduce((s, p) => s + Number(p.received_amount || 0), 0) +
+      periodCredits.filter((c) => c.entry_type === "advance").reduce((s, c) => s + Number(c.amount || 0), 0)
+    ),
     collected: events.filter((e) => e.to_status === "collected").length,
     delivered: events.filter((e) => e.to_status === "delivered").length,
     credit_added: money(periodCredits.filter((c) => Number(c.amount) > 0).reduce((s, c) => s + Number(c.amount || 0), 0)),
@@ -473,6 +556,11 @@ async function buildReports(actor, params) {
     method[p.method] = money((method[p.method] || 0) + Number(p.received_amount || 0));
     context[p.payment_context] = money((context[p.payment_context] || 0) + Number(p.received_amount || 0));
   }
+  for (const c of periodCredits.filter((x) => x.entry_type === "advance" && Number(x.amount) > 0)) {
+    const m = c.method || "other";
+    method[m] = money((method[m] || 0) + Number(c.amount || 0));
+    context.advance = money((context.advance || 0) + Number(c.amount || 0));
+  }
 
   const seriesMap = new Map();
   const ensureBucket = (key) => {
@@ -484,6 +572,7 @@ async function buildReports(actor, params) {
     b.orders += 1; b.pieces += Number(piecesByOrder[o.id] || 0); b.sales += Number(o.total || 0);
   }
   for (const p of periodPayments) ensureBucket(bucketKey(p.created_at, group)).payments_received += Number(p.received_amount || 0);
+  for (const c of periodCredits.filter((x) => x.entry_type === "advance" && Number(x.amount) > 0)) ensureBucket(bucketKey(c.created_at, group)).payments_received += Number(c.amount || 0);
   for (const e of events) {
     const b = ensureBucket(bucketKey(e.created_at, group));
     if (e.to_status === "collected") b.collected += 1;
@@ -493,7 +582,8 @@ async function buildReports(actor, params) {
 
   let customers = [];
   if (actor.actor_type === "staff" && ["admin", "manager"].includes(actor.role)) {
-    const customerRows = await fetchCustomersByIds(scopedCustomerIds);
+    const reportCustomerIds = uniq([...scopedCustomerIds, ...credits.map((c) => c.customer_id), ...allPayments.map((p) => p.customer_id)]);
+    const customerRows = await fetchCustomersByIds(reportCustomerIds);
     const nameMap = new Map(customerRows.map((c) => [c.id, c]));
     const rowMap = new Map();
     const ensureCustomer = (cid) => {
@@ -509,6 +599,7 @@ async function buildReports(actor, params) {
       const row = ensureCustomer(o.customer_id); row.orders += 1; row.pieces += Number(piecesByOrder[o.id] || 0); row.sales += Number(o.total || 0);
     }
     for (const p of periodPayments) ensureCustomer(p.customer_id).payments_received += Number(p.received_amount || 0);
+    for (const c of periodCredits.filter((x) => x.entry_type === "advance" && Number(x.amount) > 0)) ensureCustomer(c.customer_id).payments_received += Number(c.amount || 0);
     customers = [...rowMap.values()].map((r) => ({ ...r, sales: money(r.sales), payments_received: money(r.payments_received), outstanding: money(r.outstanding), credit: money(r.credit), net_position: money(r.outstanding - r.credit) })).sort((a, b) => b.sales - a.sales || b.payments_received - a.payments_received);
   }
 
@@ -526,6 +617,10 @@ async function buildReports(actor, params) {
   for (const p of allPayments) {
     const t = new Date(p.created_at).getTime();
     if (t >= calStart && t <= calEnd) calBucket(dubaiDayKey(p.created_at)).payments_received += Number(p.received_amount || 0);
+  }
+  for (const c of credits.filter((x) => x.entry_type === "advance" && Number(x.amount) > 0)) {
+    const t = new Date(c.created_at).getTime();
+    if (t >= calStart && t <= calEnd) calBucket(dubaiDayKey(c.created_at)).payments_received += Number(c.amount || 0);
   }
   let calendarEvents = await fetchPaged("laundry_order_events", "order_id,to_status,actor_id,created_at", (q) => {
     q = q.gte("created_at", calFrom).lte("created_at", calTo.toISOString()).in("to_status", ["collected", "delivered"]);
@@ -559,13 +654,19 @@ async function quickAdvance(order, actor) {
   if (status === "pickup_requested") throw new Error("Pickup must be completed by the assigned delivery user");
   if (status === "collected") { await setStatus(order, "received", actor, "Quick flow"); return "received"; }
   if (status === "received") {
-    const target = order.items?.length > 0 && order.items.every((x) => x.service?.workflow === "iron_only") ? "ironing" : "washing";
+    const target = workflowProfile(order).first;
     await setStatus(order, target, actor, "Quick flow: started processing");
     return target;
   }
+  if (status === "processing") { await setStatus(order, "ready", actor, "Quick flow: marked ready"); return "ready"; }
   if (status === "washing") {
-    await setStatus(order, "ironing", actor, "Quick flow: processing");
-    await setStatus({ ...order, laundry_status: "ironing" }, "ready", actor, "Quick flow: marked ready");
+    const next = workflowProfile(order).afterWash;
+    if (next === "ironing") {
+      await setStatus(order, "ironing", actor, "Quick flow: processing");
+      await setStatus({ ...order, laundry_status: "ironing" }, "ready", actor, "Quick flow: marked ready");
+    } else {
+      await setStatus(order, "ready", actor, "Quick flow: marked ready");
+    }
     return "ready";
   }
   if (status === "ironing") { await setStatus(order, "ready", actor, "Quick flow: marked ready"); return "ready"; }
@@ -665,13 +766,14 @@ async function actionHandler(actor, body) {
     const items = (body.items || []).filter((x) => Number(x.quantity) > 0);
     const priced = await db.rpc("laundry_replace_order_items", { p_order_id: order.id, p_items: items });
     if (priced.error) throw priced.error;
+    const creditApplied = await applyAvailableCredit(order.id, actor);
     await addEvent(order.id, null, "received", actor, "Counter intake");
     let payment = null;
     if (Number(body.payment_amount || 0) > 0) {
       payment = await recordPayment(order.id, actor, { amount: body.payment_amount, method: body.payment_method || "cash", context: "shop" });
     }
     await audit(actor, "counter_order_created", "order", order.id, priced.data?.[0] || null);
-    return { order_id: order.id, pricing: priced.data?.[0] || null, payment };
+    return { order_id: order.id, pricing: priced.data?.[0] || null, credit_applied: creditApplied, payment };
   }
 
   if (action === "assign_driver") {
@@ -702,12 +804,13 @@ async function actionHandler(actor, body) {
     const items = (body.items || []).filter((x) => Number(x.quantity) > 0);
     const priced = await db.rpc("laundry_replace_order_items", { p_order_id: order.id, p_items: items });
     if (priced.error) throw priced.error;
+    const creditApplied = await applyAvailableCredit(order.id, actor);
     if (Number(body.payment_amount || 0) > 0) {
       await recordPayment(order.id, actor, { amount: body.payment_amount, method: body.payment_method || "cash", context: "pickup" });
     }
     const refreshed = await orderForAction(order.id);
     await setStatus(refreshed, "collected", actor, "Doorstep collection completed");
-    return { collected: true, pricing: priced.data?.[0] || null };
+    return { collected: true, pricing: priced.data?.[0] || null, credit_applied: creditApplied };
   }
 
   if (action === "advance_order") {
@@ -730,6 +833,22 @@ async function actionHandler(actor, body) {
     const refreshed = await orderForAction(order.id);
     await setStatus(refreshed, "delivered", actor, "Delivery handed over");
     return { delivered: true };
+  }
+
+  if (action === "record_customer_payment") {
+    requireRole(actor, ["admin", "manager"]);
+    const amount = Number(body.amount || 0);
+    if (!(amount > 0)) throw new Error("Enter a payment amount greater than zero");
+    const { data, error } = await db.rpc("laundry_record_customer_payment_tx", {
+      p_customer_id: body.customer_id,
+      p_collected_by: actor.id,
+      p_received_amount: amount,
+      p_method: body.method || "cash",
+      p_note: body.note || null,
+    });
+    if (error) throw error;
+    await audit(actor, "customer_account_payment", "customer", body.customer_id, data || null);
+    return { result: data || null };
   }
 
   if (action === "record_payment") {
@@ -867,7 +986,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && (path === "/" || path === "/health")) {
-      return json({ ok: true, service: "laundry-api", version: "1.3.1", time: new Date().toISOString() });
+      return json({ ok: true, service: "laundry-api", version: "1.4.0", time: new Date().toISOString() });
     }
 
     if (req.method === "POST" && path === "/login") {
@@ -929,6 +1048,12 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && path === "/reports") {
       return json(await buildReports(actor, new URL(req.url).searchParams));
+    }
+
+    if (req.method === "GET" && path === "/customer-finance") {
+      const customerId = new URL(req.url).searchParams.get("id") || (actor.actor_type === "customer" ? actor.id : null);
+      if (!customerId) return fail("Customer is required", 400);
+      return json({ ok: true, ...(await customerFinance(actor, customerId)) });
     }
 
     if (req.method === "POST" && path === "/action") {
