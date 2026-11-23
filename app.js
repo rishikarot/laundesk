@@ -626,8 +626,49 @@
     return `<div class="modal-head"><div><div class="kicker">${kicker}</div><h2>${title}</h2></div><button type="button" class="x" data-action="close-modal">×</button></div>${extraTop}<div class="section collection-section"><div class="row between collection-heading"><div><div class="kicker">1 · Service</div><h3>Choose service, then tap garments</h3></div><span class="small muted">Mix services in one collection</span></div><div id="collectionServices">${collectionServiceTabs()}</div></div><div class="section collection-section"><div class="row between collection-heading"><div class="kicker">2 · Garments</div><input id="garmentSearch" class="input collection-search" placeholder="Search garment" autocomplete="off"></div><div id="itemPicker">${itemPicker(state.serviceId)}</div></div><div id="collectionSummary">${collectionSummary()}</div>${extraBottom}`;
   }
 
+
+  function customerPicker(name="customer_id",selectedId=""){
+    const c=state.data.customers.find(x=>x.id===selectedId)||null;
+    const loc=c?customerLocationLabel(c,false):"";
+    return `<div class="customer-search-picker" data-customer-picker>
+      <input type="hidden" name="${name}" value="${esc(selectedId||'')}" data-customer-id>
+      <label>Customer
+        <div class="customer-search-box">
+          <span class="customer-search-icon">${icon("user","sm")}</span>
+          <input class="input customer-search-input" type="search" autocomplete="off" placeholder="Search name, mobile, building or door no." value="${c?esc(c.name):''}" data-customer-search>
+          <button type="button" class="customer-search-clear" data-customer-clear aria-label="Clear customer">×</button>
+        </div>
+      </label>
+      <div class="customer-search-selected ${c?'show':''}" data-customer-selected>${c?`<b>${esc(c.name)}</b><span>${esc(loc||c.customer_code)} · ${esc(c.mobile||'')}</span>`:''}</div>
+      <div class="customer-search-results" data-customer-results></div>
+    </div>`;
+  }
+  function customerSearchText(c){return [c.name,c.mobile,c.customer_code,c.building_block,c.door_no,c.address].filter(Boolean).join(" ").toLowerCase()}
+  function customerSearchResults(term){
+    const q=String(term||"").trim().toLowerCase();
+    let rows=state.data.customers.filter(c=>c.access_enabled!==false);
+    if(q) rows=rows.filter(c=>customerSearchText(c).includes(q));
+    return rows.sort((a,b)=>{
+      if(q){const an=(a.name||"").toLowerCase().startsWith(q)?0:1,bn=(b.name||"").toLowerCase().startsWith(q)?0:1;if(an!==bn)return an-bn}
+      return (a.name||"").localeCompare(b.name||"");
+    }).slice(0,8);
+  }
+  function renderCustomerSearch(picker,term=""){
+    const results=picker?.querySelector("[data-customer-results]");if(!results)return;
+    const rows=customerSearchResults(term);
+    results.innerHTML=rows.length?rows.map(c=>`<button type="button" class="customer-search-result" data-customer-choice="${c.id}"><span class="customer-result-main"><b>${esc(c.name)}</b><small>${esc(c.building_block||'Building —')}${c.door_no?` · Door ${esc(c.door_no)}`:' · Door —'}</small></span><span class="customer-result-mobile">${esc(c.mobile||'')}</span></button>`).join(""):`<div class="customer-search-empty">No matching customer</div>`;
+    results.classList.add("show");
+  }
+  function chooseCustomer(picker,customerId){
+    const c=state.data.customers.find(x=>x.id===customerId);if(!c||!picker)return;
+    const hidden=picker.querySelector("[data-customer-id]"),input=picker.querySelector("[data-customer-search]"),selected=picker.querySelector("[data-customer-selected]"),results=picker.querySelector("[data-customer-results]");
+    hidden.value=c.id; input.value=c.name;
+    selected.innerHTML=`<b>${esc(c.name)}</b><span>${esc(c.building_block||'Building —')}${c.door_no?` · Door ${esc(c.door_no)}`:' · Door —'} · ${esc(c.mobile||'')}</span>`;selected.classList.add("show");
+    results.classList.remove("show");results.innerHTML="";
+  }
+
   function openCounter(){
-    const top=`<div class="form-grid two"><label>Customer<select name="customer_id" required><option value="">Choose customer</option>${state.data.customers.map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.building_block||c.address||c.customer_code)}${c.door_no?` · Door ${esc(c.door_no)}`:""}</option>`).join("")}</select></label><label>Discount <span class="muted">optional</span><select name="discount_id"><option value="">No discount</option>${state.data.refs.discounts.filter(d=>d.active&&Number(d.value)>0).map(d=>`<option value="${d.id}">${esc(d.name)} · ${d.discount_type==='percent'?d.value+'%':fmt(d.value)}</option>`).join("")}</select></label></div>`;
+    const top=`<div class="form-grid two">${customerPicker("customer_id")}<label>Discount <span class="muted">optional</span><select name="discount_id"><option value="">No discount</option>${state.data.refs.discounts.filter(d=>d.active&&Number(d.value)>0).map(d=>`<option value="${d.id}">${esc(d.name)} · ${d.discount_type==='percent'?d.value+'%':fmt(d.value)}</option>`).join("")}</select></label></div>`;
     const bottom=`<div class="section form-grid two"><label>Payment now <span class="muted">optional</span><input class="input" name="payment_amount" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Method<select name="payment_method"><option>cash</option><option>card</option><option>bank</option><option>other</option></select></label></div><p class="small muted">Available customer advance is applied automatically before any new payment.</p><div class="section"><button class="btn primary block">CREATE ORDER →</button></div>`;
     const body=collectionEntry("New counter order","At the shop","counterForm",top,bottom);if(!body)return;
     state.modal=`<div class="modal-backdrop"><form class="modal collection-modal" id="counterForm">${body}</form></div>`;renderApp();
@@ -636,7 +677,7 @@
 
   function openPickupRequest(){
     const drivers=state.data.staff.filter(s=>s.role==="delivery"&&s.active);
-    state.modal=`<div class="modal-backdrop"><form class="modal" id="pickupStaffForm"><div class="modal-head"><div><div class="kicker">WhatsApp / phone</div><h2>Pickup request</h2></div><button type="button" class="x" data-action="close-modal">×</button></div><div class="stack"><label>Customer<select name="customer_id" required><option value="">Choose customer</option>${state.data.customers.map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.building_block||c.address||c.customer_code)}${c.door_no?` · Door ${esc(c.door_no)}`:""}</option>`).join("")}</select></label><label>Assign pickup<select name="pickup_driver_id"><option value="">Assign later</option>${drivers.map(d=>`<option value="${d.id}">${esc(d.display_name)}</option>`).join("")}</select></label><label>Address / note<textarea name="note" placeholder="Preferred time, building, WhatsApp note..."></textarea></label><button class="btn primary block">SAVE REQUEST →</button></div></form></div>`;renderApp();
+    state.modal=`<div class="modal-backdrop"><form class="modal" id="pickupStaffForm"><div class="modal-head"><div><div class="kicker">WhatsApp / phone</div><h2>Pickup request</h2></div><button type="button" class="x" data-action="close-modal">×</button></div><div class="stack">${customerPicker("customer_id")}<label>Assign pickup<select name="pickup_driver_id"><option value="">Assign later</option>${drivers.map(d=>`<option value="${d.id}">${esc(d.display_name)}</option>`).join("")}</select></label><label>Address / note<textarea name="note" placeholder="Preferred time, building, WhatsApp note..."></textarea></label><button class="btn primary block">SAVE REQUEST →</button></div></form></div>`;renderApp();
   }
 
   function openCollect(orderId){
@@ -688,8 +729,8 @@
   function bindDynamicForms(){
     const bind=(formId,fn)=>{const f=id(formId);if(f)f.addEventListener("submit",fn)};
     bind("pickupSelfForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"create_pickup_request",address:f.get("address"),note:f.get("note")},"Pickup requested",e.submitter)});
-    bind("pickupStaffForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"create_pickup_request",customer_id:f.get("customer_id"),pickup_driver_id:f.get("pickup_driver_id")||null,note:f.get("note")},"Pickup request saved",e.submitter)});
-    bind("counterForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems();if(!items.length)return toast("Add at least one garment",true);doAction({action:"create_counter_order",customer_id:f.get("customer_id"),discount_id:f.get("discount_id")||null,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Counter order created",e.submitter)});
+    bind("pickupStaffForm",e=>{e.preventDefault();const f=new FormData(e.target);if(!f.get("customer_id"))return toast("Search and select a customer",true);doAction({action:"create_pickup_request",customer_id:f.get("customer_id"),pickup_driver_id:f.get("pickup_driver_id")||null,note:f.get("note")},"Pickup request saved",e.submitter)});
+    bind("counterForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems();if(!f.get("customer_id"))return toast("Search and select a customer",true);if(!items.length)return toast("Add at least one garment",true);doAction({action:"create_counter_order",customer_id:f.get("customer_id"),discount_id:f.get("discount_id")||null,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Counter order created",e.submitter)});
     bind("collectForm",e=>{e.preventDefault();const f=new FormData(e.target),items=selectedItems();if(!items.length)return toast("Add at least one garment",true);doAction({action:"collect_pickup",order_id:e.target.dataset.order,items,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Pickup collected",e.submitter)});
     bind("deliverForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"deliver_order",order_id:e.target.dataset.order,payment_amount:f.get("payment_amount"),payment_method:f.get("payment_method")},"Delivered",e.submitter)});
     bind("paymentForm",e=>{e.preventDefault();const f=new FormData(e.target);doAction({action:"record_payment",order_id:f.get("order_id"),amount:f.get("amount"),method:f.get("method"),context:f.get("context")},"Payment recorded",e.submitter)});
@@ -745,6 +786,9 @@
     const workflow=e.target.closest("[data-workflow-mode]");if(workflow){state.workflowMode=workflow.dataset.workflowMode==="detailed"?"detailed":"quick";localStorage.setItem("laundry_workflow_mode",state.workflowMode);openOrder(workflow.dataset.id);return}
     const reportTab=e.target.closest("[data-report-tab]");if(reportTab){state.reportTab=reportTab.dataset.reportTab;renderApp();return}
     const reportPreset=e.target.closest("[data-report-preset]");if(reportPreset){state.reportPreset=reportPreset.dataset.reportPreset;localStorage.setItem("laundry_report_preset",state.reportPreset);if(state.reportPreset==="this_year")state.reportGroup="month";else if(state.reportPreset!=="custom")state.reportGroup="day";localStorage.setItem("laundry_report_group",state.reportGroup);renderApp();loadReports(true);return}
+    const customerChoice=e.target.closest("[data-customer-choice]");if(customerChoice){const picker=customerChoice.closest("[data-customer-picker]");chooseCustomer(picker,customerChoice.dataset.customerChoice);return}
+    const customerClear=e.target.closest("[data-customer-clear]");if(customerClear){const picker=customerClear.closest("[data-customer-picker]");const hidden=picker?.querySelector("[data-customer-id]"),input=picker?.querySelector("[data-customer-search]"),selected=picker?.querySelector("[data-customer-selected]"),results=picker?.querySelector("[data-customer-results]");if(hidden)hidden.value="";if(input){input.value="";input.focus()}if(selected){selected.classList.remove("show");selected.innerHTML=""}if(results)renderCustomerSearch(picker,"");return}
+    if(!e.target.closest("[data-customer-picker]"))document.querySelectorAll("[data-customer-results].show").forEach(x=>x.classList.remove("show"));
     const b=e.target.closest("[data-action]");if(!b)return;const a=b.dataset.action;
     if(a==="logout")return logout(true,b); if(a==="toggle-theme"){applyMode(state.mode==="graphite"?"light":"graphite",true);renderApp();return} if(a==="theme")return openTheme(); if(a==="close-modal")return closeModal();
     if(a==="open-demo-reset")return openDemoReset();
@@ -766,6 +810,14 @@
     if(a==="toggle-customer")return doAction({action:"set_customer_access",customer_id:b.dataset.id,enabled:b.dataset.enabled!=="true"},"Customer access updated",b,"Updating access…");
     if(a==="reset-customer"){if(!confirm("Reset this customer's six-digit login code?"))return;try{setBusy(true,b,"Resetting code…");const r=await api("/action",{method:"POST",body:{action:"reset_customer_pin",customer_id:b.dataset.id}});await refresh();alert(`New customer code: ${r.pin}\nShare it privately with the customer.`)}catch(err){toast(err.message,true)}finally{setBusy(false)}return}
   });
+
+  document.addEventListener("input",e=>{
+    const input=e.target.closest("[data-customer-search]");if(!input)return;
+    const picker=input.closest("[data-customer-picker]");const hidden=picker?.querySelector("[data-customer-id]"),selected=picker?.querySelector("[data-customer-selected]");
+    if(hidden)hidden.value="";if(selected){selected.classList.remove("show");selected.innerHTML=""}
+    renderCustomerSearch(picker,input.value);
+  });
+  document.addEventListener("focusin",e=>{const input=e.target.closest("[data-customer-search]");if(input)renderCustomerSearch(input.closest("[data-customer-picker]"),input.value)});
 
   document.addEventListener("change",e=>{
     if(e.target?.matches?.("[data-bulk-pickup]")){if(e.target.checked)state.bulkPickupSelected.add(e.target.dataset.bulkPickup);else state.bulkPickupSelected.delete(e.target.dataset.bulkPickup);renderApp();return}
