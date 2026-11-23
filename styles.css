@@ -223,3 +223,34 @@ html[data-theme="graphite"] .order-action:hover{border-color:#59616a}
 .account-grid>.card{align-self:start}
 .qty-row.disabled-row{opacity:.56}
 .qty-row.disabled-row .stepper button:disabled{cursor:not-allowed;opacity:.45}
+
+/* Compact admin/customer/rate editors */
+.compact-head{margin-bottom:10px}.compact-head h2{margin-bottom:2px}
+.quick-entry{display:grid;gap:8px;padding:10px;margin-bottom:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-soft)}
+.quick-entry-customer{grid-template-columns:minmax(150px,1.1fr) minmax(150px,.9fr) minmax(200px,1.6fr) auto}
+.quick-entry .input,.rate-editor .input{min-height:36px;padding:7px 9px}
+.compact-table table,.rate-editor table{min-width:720px}
+.compact-table th,.compact-table td,.rate-editor th,.rate-editor td{padding:8px 10px;vertical-align:middle}
+.compact-actions{gap:6px;flex-wrap:nowrap;justify-content:flex-end}
+.rate-editor .inline-input{width:130px;max-width:100%;background:var(--surface)}
+.rate-editor input[type="date"].inline-input{width:150px}
+.rate-editor .quick-add-row td{background:var(--surface-soft);border-bottom:1px solid var(--border-strong)}
+.rate-editor .quick-add-row select{min-width:150px;min-height:36px}
+.page-head-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.customer-table td:last-child{text-align:right}
+
+@media(max-width:719px){
+  .quick-entry-customer{grid-template-columns:1fr 1fr}.quick-entry-customer input[name="address"],.quick-entry-customer .btn{grid-column:1/-1}
+  .page-head-actions{width:100%;justify-content:flex-start}.page-head-actions .btn{flex:1}
+  .compact-table,.rate-editor{border:0;background:transparent;overflow:visible}
+  .compact-table table,.rate-editor table{min-width:0;display:block}.compact-table thead,.rate-editor thead{display:none}.compact-table tbody,.rate-editor tbody{display:grid;gap:8px}
+  .compact-table tr,.rate-editor tr{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:10px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+  .compact-table td,.rate-editor td{display:block;padding:0;border:0}.compact-table td:first-child,.rate-editor td:first-child{grid-column:1/-1}
+  .compact-table td:nth-child(3){grid-column:1/-1}.compact-table td:last-child{grid-column:1/-1;text-align:left}.compact-actions{justify-content:flex-start;flex-wrap:wrap}
+  .rate-editor .quick-add-row{background:var(--surface-soft)}.rate-editor .quick-add-row td:nth-child(1),.rate-editor .quick-add-row td:nth-child(2){grid-column:auto}.rate-editor .quick-add-row td:nth-child(5){grid-column:1/-1}
+  .rate-editor .quick-add-row .btn{width:100%}.rate-editor .inline-input,.rate-editor input[type="date"].inline-input,.rate-editor select{width:100%;min-width:0}
+}
+
+/* Admin demo reset */
+.system-grid{align-items:start}.demo-reset-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.demo-reset-summary>div,.reset-scope>div{border:1px solid var(--border);border-radius:11px;background:var(--surface-soft);padding:10px;display:grid;gap:3px}.demo-reset-summary span,.reset-scope span{font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:800}.demo-reset-summary b{font-size:15px}.retain-list{display:grid;gap:3px;padding:9px 0;border-top:1px solid var(--border)}.retain-list:first-of-type{border-top:0}.retain-list span{font-size:11px;color:var(--muted);line-height:1.45}.danger-note{border:1px solid color-mix(in srgb,var(--danger) 35%,var(--border));background:color-mix(in srgb,var(--danger) 8%,var(--surface));border-radius:12px;padding:12px;display:grid;gap:4px}.danger-note b{color:var(--danger)}.danger-note span{font-size:11px;color:var(--muted);line-height:1.45}.reset-scope{display:grid;grid-template-columns:1fr 1fr;gap:8px}.reset-scope b{font-size:11px;line-height:1.4}.btn.danger{background:var(--danger);border-color:var(--danger);color:#fff}.btn.danger:hover{filter:brightness(.96)}
+@media(max-width:719px){.demo-reset-summary{grid-template-columns:1fr}.reset-scope{grid-template-columns:1fr}}

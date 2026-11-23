@@ -796,17 +796,21 @@ async function actionHandler(actor, body) {
 
   if (action === "save_rate") {
     requireRole(actor, ["admin"]);
+    const unitPrice = Number(body.unit_price);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Enter a valid rate");
     const payload = {
       garment_type_id: body.garment_type_id,
       service_id: body.service_id,
-      unit_price: Number(body.unit_price),
+      unit_price: unitPrice,
       active: body.active !== false,
       effective_from: body.effective_from || new Date().toISOString().slice(0, 10),
       effective_to: body.effective_to || null,
     };
-    const r = await db.from("laundry_rates").upsert(payload, { onConflict: "garment_type_id,service_id,effective_from" }).select("id").single();
+    let r;
+    if (body.id) r = await db.from("laundry_rates").update(payload).eq("id", body.id).select("id").single();
+    else r = await db.from("laundry_rates").upsert(payload, { onConflict: "garment_type_id,service_id,effective_from" }).select("id").single();
     if (r.error) throw r.error;
-    await audit(actor, "rate_saved", "rate", r.data.id, payload);
+    await audit(actor, body.id ? "rate_updated" : "rate_saved", "rate", r.data.id, payload);
     return { id: r.data.id };
   }
 
@@ -826,6 +830,14 @@ async function actionHandler(actor, body) {
     const order = await orderForAction(body.order_id);
     const status = await quickAdvance(order, actor);
     return { status };
+  }
+
+  if (action === "reset_demo_data") {
+    requireRole(actor, ["admin"]);
+    if (String(body.confirmation || "").trim().toUpperCase() !== "RESET") throw new Error("Type RESET to confirm");
+    const { data, error } = await db.rpc("laundry_reset_demo_data", { p_actor_id: actor.id });
+    if (error) throw error;
+    return { reset: data || {} };
   }
 
   if (action === "save_business_settings") {
@@ -855,7 +867,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && (path === "/" || path === "/health")) {
-      return json({ ok: true, service: "laundry-api", version: "1.2.1", time: new Date().toISOString() });
+      return json({ ok: true, service: "laundry-api", version: "1.3.1", time: new Date().toISOString() });
     }
 
     if (req.method === "POST" && path === "/login") {
