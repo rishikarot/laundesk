@@ -64,3 +64,13 @@ It retains staff users, customer accounts and login codes, organization settings
 - Customer payments settle oldest outstanding orders first and keep only the excess as advance.
 - Existing advance is auto-applied to newly priced orders and recorded as debit/credit ledger entries.
 - Backend: Supabase `laundry-api` API v1.4.0.
+
+## v1.5.0 — Flexible quick flow & route assignment
+
+- Quick stages are now flexible forward milestones: Requested → Collected → Received → In Progress → Ready → Delivered.
+- Admin/Manager can tap any later quick stage directly; skipped milestones are not auto-tagged.
+- Confirmation is OFF by default. Admin can enable **Setup → Workflow → Confirm stage changes**.
+- Pickup requests can be filtered by Building/Block, sorted, multi-selected and assigned to one collection boy in one action.
+- Delivery users can filter/sort assigned pickup stops by Building/Block.
+- Customers now have separate Building/Block and Door No. fields in addition to Area/Street address.
+- Customer directory supports Building/Block filtering and sorting by Building + Door, Customer, Newest or Oldest.

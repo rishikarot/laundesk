@@ -289,3 +289,53 @@ html[data-theme="graphite"] .order-action:hover{border-color:#59616a}
 .order-optimal>.order-card-actions{justify-self:end}.order-detailed>.order-card-actions{margin-top:9px}
 @media(max-width:719px){.order-optimal>.order-card-actions{grid-area:detail;justify-self:end}.order-optimal>.order-card-actions .btn{padding:5px 8px}}
 @media(min-width:720px){.grid.cards .order-optimal>.order-card-actions{grid-area:detail;justify-self:end}}
+
+/* v1.5 flexible quick flow, route grouping and bulk pickup assignment */
+.quick-stage-actions .stage.future{
+  cursor:pointer;
+  border-style:solid;
+  background:var(--surface-raised,#fff);
+  color:var(--text,#111827);
+}
+.quick-stage-actions button.stage.future:hover{
+  border-color:var(--brand-accent,#64748b);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--brand-accent,#64748b) 14%,transparent);
+}
+.quick-stage-note{margin-top:7px}
+.workflow-settings-card{max-width:760px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface-subtle)}
+.toggle-row span{display:grid;gap:4px}.toggle-row small{color:var(--muted);font-weight:400;line-height:1.4}
+.toggle-row input{width:22px;height:22px;accent-color:var(--brand-accent,#64748b)}
+.workflow-example{display:flex;gap:6px;overflow:auto;padding:4px 0;scrollbar-width:none}
+.workflow-example::-webkit-scrollbar{display:none}.workflow-example span{white-space:nowrap;border:1px solid var(--border);border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;background:var(--surface-subtle)}
+.customer-tools,.bulk-pickup-toolbar,.bulk-assign-bar{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:12px 0}
+.customer-tools label,.bulk-pickup-toolbar label{display:grid;gap:5px;min-width:190px;font-size:11px;font-weight:800;color:var(--muted)}
+.customer-tools select,.bulk-pickup-toolbar select,.bulk-assign-bar select{min-height:42px;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);padding:0 10px}
+.quick-entry-customer{grid-template-columns:minmax(160px,1.2fr) minmax(145px,.9fr) minmax(150px,1fr) 110px minmax(160px,1fr) auto}
+.bulk-pickup-card{padding:15px;margin-bottom:14px}
+.bulk-head h2{margin:2px 0 3px;font-size:18px}
+.bulk-pickup-list{display:grid;gap:6px;max-height:280px;overflow:auto;border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:8px 0}
+.bulk-pickup-row{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:10px;padding:9px 8px;border-radius:10px;cursor:pointer}
+.bulk-pickup-row:hover{background:var(--surface-subtle)}
+.bulk-pickup-row input{width:18px;height:18px;accent-color:var(--brand-accent,#64748b)}
+.bulk-pickup-row span{display:grid;gap:2px}.bulk-pickup-row small{color:var(--muted)}
+.bulk-assign-bar{justify-content:flex-end;margin-bottom:0}.bulk-assign-bar select{min-width:220px}
+.customer-table td{vertical-align:middle}
+
+@media(max-width:900px){
+  .quick-entry-customer{grid-template-columns:1fr 1fr}
+  .quick-entry-customer .btn{grid-column:span 2}
+  .bulk-pickup-toolbar label,.customer-tools label{min-width:calc(50% - 5px)}
+}
+@media(max-width:620px){
+  .quick-stage-actions{display:flex;overflow:auto;gap:6px;padding-bottom:4px;scroll-snap-type:x proximity}
+  .quick-stage-actions .stage{min-width:112px;scroll-snap-align:start}
+  .customer-tools,.bulk-pickup-toolbar{display:grid;grid-template-columns:1fr 1fr}
+  .customer-tools label,.bulk-pickup-toolbar label{min-width:0}
+  .bulk-pickup-toolbar .btn{grid-column:span 2}
+  .bulk-assign-bar{display:grid;grid-template-columns:1fr}.bulk-assign-bar select{min-width:0;width:100%}.bulk-assign-bar .btn{width:100%}
+  .bulk-pickup-row{grid-template-columns:22px 1fr}.bulk-pickup-row>span:last-child{display:none}
+  .quick-entry-customer{grid-template-columns:1fr}.quick-entry-customer .btn{grid-column:auto}
+}
+.delivery-route-tools{display:flex;gap:8px;align-items:center}.delivery-route-tools select{min-height:40px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);padding:0 9px;font-size:12px}
+@media(max-width:620px){.delivery-route-tools{width:100%;display:grid;grid-template-columns:1fr 1fr}.delivery-route-tools select{width:100%}}
