@@ -434,3 +434,128 @@ html[data-theme="graphite"] .collection-floating-summary{box-shadow:0 16px 38px 
 @media(max-width:430px){
   .driver-chip-group .choice-chip{flex-basis:100%}
 }
+
+/* v1.5.2 compact-first UX — aligned order entry, keyboard picker, multi-status filters */
+.main{padding-top:20px}
+.page-head{align-items:center;margin-bottom:12px}
+.page-head-copy{display:grid;gap:3px}
+.page-title-line{display:flex;align-items:baseline;gap:12px;min-width:0;flex-wrap:wrap}
+.page-title-line h1{font-size:clamp(24px,3vw,34px);line-height:1.05;margin:0}
+.page-title-line .sub{margin:0;font-size:12px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:640px}
+.page-head .kicker{font-size:9px;letter-spacing:.1em}
+.section{margin-top:17px}
+.section-head{margin-bottom:7px;align-items:center}
+.section-head h2{font-size:18px;margin:0}
+.compact-head{margin-bottom:6px}
+
+/* Counter order — customer + discount share one clean row */
+.counter-top-grid{display:grid;grid-template-columns:minmax(340px,1.25fr) minmax(300px,1fr);gap:14px;align-items:start;margin-bottom:4px}
+.counter-customer-cell,.counter-discount-field{min-width:0}
+.counter-discount-field{padding-top:0}
+.inline-label{display:block;margin-bottom:0}
+.discount-chip-group{gap:6px;align-items:center;max-height:86px;overflow:auto;padding:1px 1px 3px}
+.discount-chip-group .choice-chip{min-height:38px;padding:6px 10px;font-size:11px;white-space:nowrap}
+.discount-chip-group .choice-chip-check{width:18px;height:18px;flex-basis:18px}
+
+/* Selected customer is a compact confirmation strip, not a second large field */
+.customer-search-selected{margin-top:5px!important;padding:6px 9px!important;display:none!important;min-height:30px!important;border-radius:9px!important;flex-direction:row!important;align-items:center!important;gap:7px!important;overflow:hidden}
+.customer-search-selected.show{display:flex!important}
+.customer-search-selected b{font-size:11px!important;white-space:nowrap}
+.customer-search-selected span{font-size:10px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.customer-search-box{margin-top:5px}
+.customer-search-input{height:44px;padding-top:8px;padding-bottom:8px}
+
+/* Search results: identity on left, exact collection location on right */
+.customer-search-results{top:70px;max-height:300px;padding:5px}
+.customer-search-result{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(125px,.7fr);gap:12px!important;padding:9px 10px!important;border:1px solid transparent!important}
+.customer-search-result.keyboard-active,.customer-search-result[aria-selected="true"]{background:var(--accent-soft)!important;border-color:color-mix(in srgb,var(--brand-accent) 35%,var(--border))!important;box-shadow:inset 3px 0 0 var(--brand-accent)}
+.customer-result-main,.customer-result-location{display:grid;gap:2px;min-width:0}
+.customer-result-main b,.customer-result-location b{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.customer-result-main small,.customer-result-location small{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.customer-result-location{text-align:right}
+html[data-theme="graphite"] .customer-search-result.keyboard-active,html[data-theme="graphite"] .customer-search-result[aria-selected="true"]{background:#24332c!important;border-color:#3d745c!important}
+
+/* Payment amount and methods stay in one horizontal row on normal screens */
+.payment-inline-row{display:grid;grid-template-columns:minmax(150px,190px) minmax(0,1fr);gap:12px;align-items:end;margin-top:14px}
+.payment-amount-field,.payment-method-field{min-width:0}
+.payment-amount-field .input{height:42px}
+.payment-method-field .field-label,.payment-amount-field .field-label{margin-bottom:5px}
+.payment-inline-row .payment-chip-group{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;padding:1px 1px 3px;scrollbar-width:none}
+.payment-inline-row .payment-chip-group::-webkit-scrollbar{display:none}
+.payment-inline-row .payment-chip-group .choice-chip{min-width:auto;min-height:42px;padding:6px 10px;flex:0 0 auto;font-size:11px}
+.payment-inline-row .payment-chip-group .choice-chip-check{width:19px;height:19px;flex-basis:19px}
+.compact-note{margin:5px 0 0!important;line-height:1.3}
+.submit-section{margin-top:12px!important}
+
+/* Enter/validation focus cue */
+.field-attention{outline:0!important;border-color:#e6a23c!important;box-shadow:0 0 0 3px rgba(230,162,60,.18)!important;animation:field-attention-pulse .7s ease 2}
+@keyframes field-attention-pulse{50%{box-shadow:0 0 0 5px rgba(230,162,60,.1)}}
+html[data-theme="graphite"] .field-attention{border-color:#f0ad4e!important;box-shadow:0 0 0 3px rgba(240,173,78,.16)!important}
+
+/* Orders: multi-select stage filters, with All mutually exclusive */
+.order-stage-tabs{display:flex;gap:5px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}
+.order-stage-tabs::-webkit-scrollbar{display:none}
+.order-stage-tabs .filter-chip{min-height:34px;padding:6px 10px;border-radius:999px;white-space:nowrap;font-size:11px}
+.order-stage-tabs .filter-chip.active{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--brand-accent) 30%,transparent)}
+.orders-toolbar{align-items:center;margin-bottom:9px}
+
+/* Customers: keep command surface and summary above the fold */
+.customer-summary-line{display:flex;align-items:center;gap:9px;margin:-2px 0 7px;font-size:11px;color:var(--muted)}
+.customer-summary-line b{color:var(--text);font-size:12px}.customer-summary-line span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.customer-command-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:end;margin-bottom:8px}
+.customer-command-row .quick-entry{margin:0}
+.customer-command-row .customer-tools{margin:0;flex-wrap:nowrap;gap:7px}
+.customer-command-row .customer-tools label{min-width:145px;gap:3px}
+.customer-command-row .customer-tools label>span{font-size:9px;text-transform:uppercase;letter-spacing:.06em}
+.customer-command-row .customer-tools select{min-height:40px}
+.quick-entry-customer{grid-template-columns:minmax(125px,1.1fr) minmax(125px,.9fr) minmax(130px,1fr) 90px minmax(130px,1fr) auto!important;gap:7px!important;padding:8px!important;margin:0!important}
+.quick-entry-customer .input{min-height:40px;height:40px;padding:7px 9px;font-size:12px}
+.quick-entry-customer .btn{min-height:40px;padding:7px 11px;white-space:nowrap}
+.customer-table th{padding-top:7px;padding-bottom:7px}.customer-table td{padding-top:8px;padding-bottom:8px}
+
+/* Modal density: keep functional content in the first viewport */
+.modal{padding:16px 18px}
+.modal-head{margin-bottom:10px;padding-bottom:10px}
+.modal-head h2{font-size:24px}
+.collection-section{margin-top:13px}
+.collection-heading h3{font-size:16px;margin:2px 0}
+.collection-service-tabs{gap:6px}
+.collection-service-chip{min-height:40px;padding:7px 11px}
+.collection-floating-summary{margin-top:8px}
+
+@media(min-width:1024px){
+  .main{padding-top:22px}
+  .page-head{margin-bottom:13px}
+}
+@media(max-width:980px){
+  .customer-command-row{grid-template-columns:1fr}
+  .customer-command-row .customer-tools{justify-content:flex-start}
+  .quick-entry-customer{grid-template-columns:1fr 1fr 1fr!important}
+  .quick-entry-customer .btn{grid-column:auto!important}
+}
+@media(max-width:719px){
+  .page-title-line{display:grid;gap:3px}.page-title-line .sub{white-space:normal;max-width:none}
+  .counter-top-grid{grid-template-columns:1fr;gap:9px}
+  .discount-chip-group{max-height:none;overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px}
+  .payment-inline-row{grid-template-columns:120px minmax(0,1fr);gap:8px}
+  .payment-inline-row .payment-chip-group{display:flex;grid-template-columns:none}
+  .payment-inline-row .payment-chip-group .choice-chip{width:auto;min-width:auto;padding:6px 8px}
+  .customer-search-result{grid-template-columns:minmax(0,1fr) minmax(105px,.65fr)}
+  .customer-command-row .customer-tools{display:grid;grid-template-columns:1fr 1fr;width:100%}
+  .customer-command-row .customer-tools label{min-width:0}
+  .quick-entry-customer{grid-template-columns:1fr 1fr!important}
+  .quick-entry-customer .btn{grid-column:span 2!important}
+}
+@media(max-width:480px){
+  .payment-inline-row{grid-template-columns:1fr;align-items:start}
+  .payment-inline-row .payment-chip-group{width:100%}
+  .customer-search-result{grid-template-columns:1fr}.customer-result-location{text-align:left}
+  .quick-entry-customer{grid-template-columns:1fr!important}.quick-entry-customer .btn{grid-column:auto!important}
+}
+
+/* Consistent compact payment pattern in direct payment, delivery and customer account */
+.payment-context-row{display:grid;grid-template-columns:minmax(150px,190px) auto;gap:10px;align-items:end;margin-top:9px}.payment-context-row select{min-height:42px}.payment-context-row .btn{min-height:42px}
+.finance-payment-grid{grid-template-columns:minmax(140px,180px) minmax(0,1fr)!important;gap:8px 10px!important;align-items:end!important}
+.finance-payment-grid .payment-chip-group{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;scrollbar-width:none}.finance-payment-grid .payment-chip-group::-webkit-scrollbar{display:none}.finance-payment-grid .payment-chip-group .choice-chip{min-width:auto;flex:0 0 auto}
+.finance-note{grid-column:1/-1!important}.finance-payment-grid .btn{grid-column:1/-1!important}
+@media(max-width:520px){.payment-context-row{grid-template-columns:1fr}.payment-context-row .btn{width:100%}.finance-payment-grid{grid-template-columns:1fr!important}.finance-payment-grid .payment-method-field,.finance-note,.finance-payment-grid .btn{grid-column:1/-1!important}}
