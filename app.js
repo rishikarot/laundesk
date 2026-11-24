@@ -38,6 +38,7 @@
     deliveryBuildingFilter: "all",
     deliverySort: "building",
     bulkPickupSelected: new Set(),
+    homeStageFilter: "all",
   };
   const app = document.getElementById("app");
   const toastEl = document.getElementById("toast");
@@ -267,7 +268,7 @@
     const navButtons=nav.map(([v,l,i])=>`<button class="navbtn ${state.view===v?'active':''}" data-view="${v}">${icon(i)}<span>${l}</span></button>`).join("");
     const org=business();
     const orgInitial=(org.name||"Laundry Desk").trim().charAt(0).toUpperCase()||"L";
-    app.innerHTML=`<div class="shell">
+    app.innerHTML=`<div class="shell ${state.view==="home"?"home-shell":""}">
       <header class="topbar"><div class="topbar-inner">
         <div class="brand"><div class="brand-mark">${esc(orgInitial)}</div><div class="brand-copy"><div>${esc(org.name||"Laundry Desk")}</div>${org.address?`<span>${esc(org.address)}</span>`:""}</div></div>
         <nav class="desktop-nav">${navButtons}</nav>
@@ -294,14 +295,52 @@
 
   function metric(label,value,accent=false){return `<div class="card metric ${accent?'accent':''}"><div class="value">${value}</div><div class="label">${label}</div></div>`}
 
+  function homeStageCount(key,summary){
+    if(key==="all") return Number(summary.active_orders||0);
+    if(key==="in_progress") return Number(summary.stage_counts.processing||0)+Number(summary.stage_counts.washing||0)+Number(summary.stage_counts.ironing||0);
+    if(key==="ready") return Number(summary.stage_counts.ready||0)+Number(summary.stage_counts.out_for_delivery||0);
+    return Number(summary.stage_counts[key]||0);
+  }
+
+  function homeStageMatch(order,key){
+    if(key==="all") return order.laundry_status!=="delivered";
+    return quickStageKey(order.laundry_status)===key;
+  }
+
+  function homeAttentionCard(o){
+    const pieces=(o.items||[]).reduce((sum,x)=>sum+Number(x.quantity||0),0);
+    const location=o.channel==="pickup"?customerLocationLabel(o.customer,false):"Counter";
+    const due=Number(o.outstanding||0);
+    const canPay=["admin","manager","delivery"].includes(state.data.actor.role)&&due>0;
+    return `<article class="home-attention-card" data-home-order="${o.id}">
+      <button class="home-attention-main" data-action="open-order" data-id="${o.id}" aria-label="Open ${esc(o.order_no)}">
+        <span class="home-attention-copy"><b>${esc(o.order_no)} · ${esc(o.customer?.name||"Customer")}</b><small>${esc(location||"")}${pieces?` · ${pieces} pcs`:""}</small></span>
+        <span class="home-stage-pill">${esc(quickStageLabel(o.laundry_status))}</span>
+      </button>
+      <div class="home-attention-side ${due>0?'has-due':''}"><small>${due>0?'Due':'Total'}</small><b>${fmt(due>0?due:o.total)}</b></div>
+      <div class="home-attention-actions">${canPay?`<button class="home-mini-action" data-action="payment" data-id="${o.id}">${icon("payment","sm")}<span>Pay</span></button>`:""}<button class="home-mini-action" data-action="open-order" data-id="${o.id}">${icon("orders","sm")}<span>Open</span></button></div>
+    </article>`;
+  }
+
   function homeStaff(){
-    const s=state.data.summary, role=state.data.actor.role;
-    const urgent=(state.data.orders||[]).filter(o=>["pickup_requested","ready"].includes(o.laundry_status)).slice(0,4);
-    const quick=["admin","manager"].includes(role)?`<section class="home-quick-section"><div class="section-head compact-head"><div><div class="kicker">Quick actions</div><h2>Start in one tap</h2></div></div><div class="home-quick-actions"><button class="home-quick-card" data-action="counter-order"><span class="home-quick-icon">${icon("orders")}</span><span><b>Counter order</b><small>Customer is at the shop</small></span></button><button class="home-quick-card" data-action="pickup-request"><span class="home-quick-icon">${icon("pickup")}</span><span><b>Pickup request</b><small>WhatsApp / phone request</small></span></button><button class="home-quick-card" data-action="receive-payment"><span class="home-quick-icon">${icon("payment")}</span><span><b>Receive payment</b><small>Due or customer advance</small></span></button><button class="home-quick-card" data-action="new-customer"><span class="home-quick-icon">${icon("user")}</span><span><b>Add customer</b><small>Create before first order</small></span></button></div></section>`:"";
-    return `${titleBlock("Today","Operations","What needs attention now.")}${quick}
-      <div class="grid metrics">${metric("Active orders",s.active_orders,true)}${metric("Outstanding",fmt(s.outstanding))}${metric("Collected",fmt(s.payments_received))}${metric("Customer credit",fmt(s.customer_credits))}</div>
-      <section class="section"><div class="section-head"><div><h2>Needs attention</h2><p class="sub small">Pickup requests and orders ready to hand over.</p></div></div>${urgent.length?`<div class="grid cards">${urgent.map(o=>orderCard(o,"optimal")).join("")}</div>`:`<div class="empty">You are up to date. No urgent work right now.</div>`}</section>
-      <section class="section"><div class="section-head"><div><h2>Work by stage</h2></div></div><div class="queue-strip">${QUICK_STAGES.filter(([k])=>k!=="delivered").map(([k,l])=>{const count=k==="in_progress"?(s.stage_counts.processing||0)+(s.stage_counts.washing||0)+(s.stage_counts.ironing||0):k==="ready"?(s.stage_counts.ready||0)+(s.stage_counts.out_for_delivery||0):(s.stage_counts[k]||0);return `<div class="queue-chip"><b>${count}</b><span>${l}</span></div>`}).join("")}</div></section>`;
+    const s=state.data.summary, role=state.data.actor.role, orders=state.data.orders||[];
+    const stages=[["all","All active"],["pickup_requested","Requested"],["collected","Collected"],["received","Received"],["in_progress","In progress"],["ready","Ready"]];
+    const activeOrders=orders.filter(o=>o.laundry_status!=="delivered");
+    let focusOrders;
+    if(state.homeStageFilter!=="all"){
+      focusOrders=activeOrders.filter(o=>homeStageMatch(o,state.homeStageFilter));
+    }else{
+      const priority=o=>o.laundry_status==="pickup_requested"?0:quickStageKey(o.laundry_status)==="ready"?1:Number(o.outstanding||0)>0?2:3;
+      focusOrders=activeOrders.filter(o=>["pickup_requested","ready","out_for_delivery"].includes(o.laundry_status)||Number(o.outstanding||0)>0).sort((a,b)=>priority(a)-priority(b)||String(b.updated_at||b.created_at||"").localeCompare(String(a.updated_at||a.created_at||"")));
+      if(!focusOrders.length)focusOrders=activeOrders;
+    }
+    focusOrders=focusOrders.slice(0,6);
+    const selectedLabel=stages.find(([k])=>k===state.homeStageFilter)?.[1]||"All active";
+    const stageStrip=`<section class="home-stage-section"><div class="home-section-head"><b>Work by stage</b><span>Tap to focus</span></div><div class="home-stage-grid">${stages.map(([k,l])=>`<button class="home-stage-card ${state.homeStageFilter===k?'active':''}" data-home-stage="${k}"><span>${esc(l)}</span><b>${homeStageCount(k,s)}</b></button>`).join("")}</div></section>`;
+    const metrics=`<section class="home-dashboard-section"><div class="home-section-head"><b>Today</b><span>Current position</span></div><div class="home-kpi-grid"><div class="home-kpi"><span>Active orders</span><b>${Number(s.active_orders||0)}</b></div><div class="home-kpi due"><span>Outstanding</span><b>${fmt(s.outstanding)}</b></div><div class="home-kpi"><span>Collected</span><b>${fmt(s.payments_received)}</b></div><div class="home-kpi credit"><span>Customer credit</span><b>${fmt(s.customer_credits)}</b></div></div></section>`;
+    const quick=["admin","manager"].includes(role)?`<section class="home-quick-section compact-home-section"><div class="home-section-head"><b>Quick actions</b><span>One tap</span></div><div class="home-quick-actions home-quick-compact"><button class="home-quick-card" data-action="counter-order"><span class="home-quick-icon">${icon("orders")}</span><span><b>Counter order</b><small>At shop</small></span></button><button class="home-quick-card" data-action="pickup-request"><span class="home-quick-icon">${icon("pickup")}</span><span><b>Pickup request</b><small>Phone / WhatsApp</small></span></button><button class="home-quick-card" data-action="receive-payment"><span class="home-quick-icon">${icon("payment")}</span><span><b>Receive payment</b><small>Due / advance</small></span></button><button class="home-quick-card" data-action="new-customer"><span class="home-quick-icon">${icon("user")}</span><span><b>Add customer</b><small>New customer</small></span></button></div></section>`:"";
+    const attention=`<section class="home-attention-section"><div class="home-section-head"><b>${state.homeStageFilter==="all"?'Needs attention':selectedLabel}</b><span>${focusOrders.length} ${focusOrders.length===1?'case':'cases'}</span></div>${focusOrders.length?`<div class="home-attention-list">${focusOrders.map(homeAttentionCard).join("")}</div>`:`<div class="empty home-empty">No orders in this stage.</div>`}</section>`;
+    return `<div class="home-compact">${stageStrip}${metrics}${quick}${attention}</div>`;
   }
 
 
@@ -884,6 +923,7 @@
     const customerChoice=e.target.closest("[data-customer-choice]");if(customerChoice){const picker=customerChoice.closest("[data-customer-picker]");chooseCustomer(picker,customerChoice.dataset.customerChoice);return}
     const customerClear=e.target.closest("[data-customer-clear]");if(customerClear){const picker=customerClear.closest("[data-customer-picker]");const hidden=picker?.querySelector("[data-customer-id]"),input=picker?.querySelector("[data-customer-search]"),selected=picker?.querySelector("[data-customer-selected]"),results=picker?.querySelector("[data-customer-results]");if(hidden)hidden.value="";if(input){input.value="";input.focus()}if(selected){selected.classList.remove("show");selected.innerHTML=""}if(results)renderCustomerSearch(picker,"");picker?.querySelector("[data-customer-search]")?.setAttribute("aria-expanded","true");if(picker?.dataset.financePicker==="true"){state.modal=customerFinanceModal(null);renderApp();setTimeout(()=>document.querySelector('.finance-modal [data-customer-search]')?.focus(),0)}return}
     if(!e.target.closest("[data-customer-picker]"))document.querySelectorAll("[data-customer-results].show").forEach(x=>x.classList.remove("show"));
+    const homeStage=e.target.closest("[data-home-stage]");if(homeStage){state.homeStageFilter=homeStage.dataset.homeStage||"all";renderApp();return}
     const b=e.target.closest("[data-action]");if(!b)return;const a=b.dataset.action;
     if(a==="logout")return logout(true,b); if(a==="toggle-theme"){applyMode(state.mode==="graphite"?"light":"graphite",true);renderApp();return} if(a==="theme")return openTheme(); if(a==="close-modal")return closeModal();
     if(a==="open-demo-reset")return openDemoReset();
