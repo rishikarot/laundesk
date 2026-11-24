@@ -585,3 +585,151 @@ html[data-theme="graphite"] .finance-position.due{background:#35201d;color:#f0a7
 @media(max-width:900px){.home-quick-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.home-quick-card:last-child{grid-column:auto}}
 @media(max-width:620px){.home-quick-actions{grid-template-columns:1fr 1fr}.payment-extra-fields{grid-template-columns:1fr}.finance-receive-head{align-items:flex-start}.finance-order-toolbar{align-items:flex-start;flex-direction:column}.finance-modal{padding-bottom:24px}}
 @media(max-width:430px){.home-quick-actions{grid-template-columns:1fr}.finance-receive-head{display:grid}.finance-after{text-align:left}}
+
+/* Receive Payment modal — fixed chrome, compact first-sight payment controls */
+.finance-modal{
+  width:min(100%,760px)!important;
+  height:min(760px,92dvh);
+  max-height:92dvh!important;
+  padding:0!important;
+  overflow:hidden!important;
+  display:flex;
+  flex-direction:column;
+  background:var(--surface);
+}
+.finance-modal .finance-modal-head{
+  position:relative!important;
+  top:auto!important;
+  flex:0 0 auto;
+  z-index:30;
+  margin:0!important;
+  padding:12px 14px!important;
+  background:var(--surface)!important;
+  border-bottom:1px solid var(--border);
+  box-shadow:0 5px 18px rgba(15,23,42,.045);
+}
+.finance-modal .finance-modal-head h2{font-size:20px!important;margin:1px 0 0!important}
+.finance-modal .finance-modal-head .x{flex:0 0 36px;width:36px;height:36px}
+.finance-modal-scroll{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+  padding:10px 14px 16px;
+  scroll-padding-top:8px;
+}
+.finance-first-view{display:grid;gap:8px}
+.finance-customer-search{margin:0!important;position:relative;z-index:20}
+.finance-modal .customer-search-box{margin-top:3px}
+.finance-modal .customer-search-input{height:40px!important}
+.finance-modal .customer-search-selected{margin-top:4px!important;padding:5px 8px!important;min-height:27px!important}
+.finance-metrics{margin:0!important;gap:7px!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
+.finance-metrics .metric{min-height:54px!important;padding:7px 9px!important;border-radius:11px!important}
+.finance-metrics .metric .value{font-size:13px!important;line-height:1.2}
+.finance-metrics .metric .label{font-size:9px!important;margin-top:2px}
+.finance-receive{
+  margin:0!important;
+  padding:9px 10px 10px!important;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface-soft);
+  box-shadow:none!important;
+}
+.finance-payment-compact{
+  display:grid;
+  grid-template-columns:140px minmax(0,1fr) auto;
+  gap:8px;
+  align-items:end;
+}
+.finance-payment-compact .field-label{margin-bottom:4px!important;font-size:10px}
+.finance-payment-compact .input{height:40px!important;min-height:40px!important;padding:7px 10px!important}
+.finance-payment-compact .payment-chip-group{
+  display:flex!important;
+  flex-wrap:nowrap!important;
+  gap:5px!important;
+  overflow-x:auto;
+  padding:0 1px 2px;
+  scrollbar-width:none;
+}
+.finance-payment-compact .payment-chip-group::-webkit-scrollbar{display:none}
+.finance-payment-compact .payment-chip-group .choice-chip{
+  min-width:auto!important;
+  width:auto!important;
+  min-height:38px!important;
+  height:38px;
+  padding:5px 8px!important;
+  gap:5px!important;
+  flex:0 0 auto!important;
+  border-radius:10px!important;
+  font-size:10px!important;
+  white-space:nowrap;
+}
+.finance-payment-compact .payment-chip-group .choice-chip .icon{width:14px;height:14px}
+.finance-payment-compact .payment-chip-group .choice-chip-check{width:17px!important;height:17px!important;flex-basis:17px!important;font-size:10px!important}
+.finance-payment-compact .finance-after{
+  min-width:92px;
+  min-height:40px;
+  align-content:center;
+  text-align:right;
+  padding-bottom:1px;
+}
+.finance-payment-compact .finance-after>span{font-size:8px}
+.finance-payment-compact .finance-after>b{font-size:10px}
+.finance-modal .payment-extra-fields{margin-top:6px!important;gap:7px!important}
+.finance-modal .payment-extra-fields .input{min-height:38px;height:38px;padding:7px 9px}
+.finance-allocation{margin-top:7px!important}
+.finance-order-toolbar{margin:3px 0 5px!important}
+.finance-order-list{max-height:128px!important;gap:4px!important}
+.finance-order-row{padding:6px 8px!important;min-height:38px}
+.finance-note{margin-top:6px!important}
+.finance-note .input{height:38px;min-height:38px}
+.finance-history-section{margin-top:12px!important}
+.finance-modal-footer{
+  flex:0 0 auto;
+  min-height:64px;
+  display:grid;
+  grid-template-columns:auto minmax(220px,320px);
+  align-items:center;
+  justify-content:end;
+  gap:12px;
+  padding:9px 14px calc(9px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--border);
+  background:var(--surface);
+  box-shadow:0 -8px 22px rgba(15,23,42,.06);
+  z-index:35;
+}
+.finance-footer-position{text-align:right;display:grid;gap:2px;justify-items:end}
+.finance-footer-position>span{font-size:8px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:800}
+.finance-footer-position>b{font-size:10px}
+.finance-submit{min-height:44px!important;height:44px;font-size:12px!important;border-radius:11px!important}
+.finance-empty-state{min-height:150px!important}
+html[data-theme="graphite"] .finance-modal .finance-modal-head,
+html[data-theme="graphite"] .finance-modal-footer{box-shadow:none}
+
+@media(max-width:620px){
+  .finance-modal{height:96dvh;max-height:96dvh!important}
+  .finance-modal-scroll{padding:8px 10px 12px}
+  .finance-modal .finance-modal-head{padding:10px!important}
+  .finance-payment-compact{grid-template-columns:110px minmax(0,1fr)}
+  .finance-payment-compact .finance-after{display:none}
+  .finance-metrics .metric{min-height:50px!important;padding:6px 7px!important}
+  .finance-payment-compact .payment-chip-group .choice-chip{height:36px;min-height:36px!important;padding:4px 7px!important;font-size:9px!important}
+  .finance-modal-footer{grid-template-columns:auto 1fr;padding:8px 10px calc(8px + env(safe-area-inset-bottom));gap:8px}
+  .finance-submit{min-width:0;width:100%}
+}
+@media(max-width:430px){
+  .finance-payment-compact{grid-template-columns:96px minmax(0,1fr)}
+  .finance-payment-compact .payment-chip-group{gap:4px!important}
+  .finance-payment-compact .payment-chip-group .choice-chip{padding:4px 6px!important}
+  .finance-modal-footer{grid-template-columns:1fr}
+  .finance-footer-position{display:none}
+}
+/* Fit all four payment methods in the first mobile view */
+.finance-payment-compact .payment-chip-group .choice-chip:not(.selected) .choice-chip-check{display:none}
+.finance-payment-compact .payment-chip-group .choice-chip .icon{width:12px!important;height:12px!important}
+@media(max-width:430px){
+  .finance-payment-compact .payment-chip-group .choice-chip{padding:4px 5px!important;gap:3px!important;font-size:8.5px!important}
+  .finance-payment-compact .payment-chip-group .choice-chip.selected{padding-left:5px!important}
+  .finance-payment-compact .payment-chip-group .choice-chip-check{width:15px!important;height:15px!important;flex-basis:15px!important}
+}
