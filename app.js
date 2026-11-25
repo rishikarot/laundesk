@@ -22,7 +22,7 @@
     qty: {},
     serviceId: null,
     garmentSearch: "",
-    theme: localStorage.getItem("laundry_theme") || "#64748b",
+    theme: localStorage.getItem("laundry_theme") || "#52664b",
     mode: localStorage.getItem("laundry_mode") || "light",
     orderView: localStorage.getItem("laundry_order_view") || "optimal",
     orderFilters: new Set(),
@@ -96,19 +96,25 @@
   }
   if(!state.reportCalendarMonth) state.reportCalendarMonth=dateKey(orgDate()).slice(0,7);
 
-  const THEME_PRESETS = ["#64748b","#2563eb","#0f766e","#7c3aed","#b45309"];
+  const THEME_PRESETS = ["#52664b","#64748b","#2563eb","#0f766e","#7c3aed","#b45309"];
   function applyTheme(color, persist=true){
-    if(!/^#[0-9a-f]{6}$/i.test(color||"")) color="#64748b";
+    if(!/^#[0-9a-f]{6}$/i.test(color||"")) color="#52664b";
     state.theme=color.toLowerCase();
     document.documentElement.style.setProperty("--brand-accent",state.theme);
     if(persist) localStorage.setItem("laundry_theme",state.theme);
   }
+  const deviceTheme=window.matchMedia("(prefers-color-scheme: dark)");
   function applyMode(mode, persist=true){
-    state.mode=mode==="light"?"light":"graphite";
-    document.documentElement.dataset.theme=state.mode;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content",state.mode==="graphite"?"#0d0f11":"#f6f7f8");
+    state.mode=mode==="system"?"system":mode==="graphite"||mode==="dark"?"graphite":"light";
+    const effective=state.mode==="system"?(deviceTheme.matches?"graphite":"light"):state.mode;
+    document.documentElement.dataset.theme=effective;
+    document.documentElement.dataset.themePreference=state.mode;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content",effective==="graphite"?"#202321":"#f7f6f2");
     if(persist) localStorage.setItem("laundry_mode",state.mode);
+    const button=document.querySelector('[data-action="theme"]');
+    if(button){button.innerHTML=icon(effective==="graphite"?"sun":"moon")+'<span>Theme</span>';}
   }
+  deviceTheme.addEventListener?.("change",()=>{if(state.mode==="system")applyMode("system",false)});
   function business(){
     return state.data?.refs?.settings?.business || {name:"Laundry Desk",address:"",phone:"",currency:"AED"};
   }
@@ -301,7 +307,7 @@
       <header class="topbar"><div class="topbar-inner">
         <div class="brand"><div class="brand-mark">${esc(orgInitial)}</div><div class="brand-copy"><div>${esc(org.name||"Laundry Desk")}</div>${org.address?`<span>${esc(org.address)}</span>`:""}</div></div>
         <nav class="desktop-nav">${navButtons}</nav>
-        <div class="actor"><div class="actor-copy"><div class="actor-name">${esc(a.role==="super_admin"?"Admin":a.display_name)}</div>${a.role==="super_admin"?"":`<div class="actor-role">${roleName(a.role)}</div>`}</div><button class="icon-btn" data-action="toggle-theme" aria-label="Switch to ${state.mode==='graphite'?'light':'graphite'} theme" title="Switch theme">${icon(state.mode==='graphite'?"sun":"moon")}</button><button class="icon-btn" data-action="theme" aria-label="Theme settings" title="Theme settings">${icon("palette")}</button><button class="btn ghost smallbtn exit-btn" data-action="logout" aria-label="Exit" title="Exit">${icon("logout","sm")}<span>Exit</span></button></div>
+        <div class="actor"><div class="actor-copy"><div class="actor-name">${esc(a.role==="super_admin"?"Admin":a.display_name)}</div>${a.role==="super_admin"?"":`<div class="actor-role">${roleName(a.role)}</div>`}</div><button class="icon-btn appearance-btn" data-action="theme" aria-label="Theme settings" title="Theme settings">${icon(document.documentElement.dataset.theme==='graphite'?"sun":"moon")}<span>Theme</span></button><button class="btn ghost smallbtn exit-btn" data-action="logout" aria-label="Exit" title="Exit">${icon("logout","sm")}<span>Exit</span></button></div>
       </div></header>
       <main class="main">${renderView()}</main>
       <nav class="bottomnav"><div class="bottomnav-inner" style="--nav-count:${nav.length}">${navButtons}</div></nav>
@@ -344,34 +350,36 @@
     const canPay=["super_admin","admin","manager","delivery"].includes(state.data.actor.role)&&due>0;
     return `<article class="home-attention-card" data-home-order="${o.id}">
       <button class="home-attention-main" data-action="open-order" data-id="${o.id}" aria-label="Open ${esc(o.order_no)}">
-        <span class="home-attention-copy"><b>${esc(o.order_no)} · ${esc(o.customer?.name||"Customer")}</b><small>${esc(location||"")}${pieces?` · ${pieces} pcs`:""}</small></span>
-        <span class="home-stage-pill">${esc(quickStageLabel(o))}</span>
+        <span class="home-attention-copy"><b>${esc(o.customer?.name||"Customer")}</b><small>${esc(o.order_no)} · ${esc(location||"")}${pieces?` · ${pieces} pcs`:""}</small></span>
+        <span class="home-stage-pill ${orderQuickStage(o)==="ready"?"is-ready":""}">${esc(quickStageLabel(o))}</span>
       </button>
-      <div class="home-attention-side ${due>0?'has-due':''}"><small>${due>0?'Due':'Total'}</small><b>${fmt(due>0?due:o.total)}</b></div>
-      <div class="home-attention-actions">${canPay?`<button class="home-mini-action" data-action="payment" data-id="${o.id}">${icon("payment","sm")}<span>Pay</span></button>`:""}<button class="home-mini-action" data-action="open-order" data-id="${o.id}">${icon("orders","sm")}<span>Open</span></button></div>
+      <div class="home-attention-side ${due>0?'has-due':''}"><small>${due>0?'Due':'Total'}</small><b>${ofmt(o,due>0?due:o.total)}</b></div>
+      <div class="home-attention-actions">${canPay?`<button class="home-mini-action" data-action="payment" data-id="${o.id}" aria-label="Receive payment for ${esc(o.order_no)}">${icon("payment","sm")}<span>Pay</span></button>`:""}<button class="home-mini-action" data-action="open-order" data-id="${o.id}" aria-label="Open ${esc(o.order_no)}">${icon("orders","sm")}<span>Open</span></button></div>
     </article>`;
   }
 
   function homeStaff(){
     const s=state.data.summary, role=state.data.actor.role, orders=state.data.orders||[];
     const configured=activeWorkflowStages().filter(x=>x.code!=="delivered");
-    const stages=[{code:"all",name:"All active"},...configured];
-    if(state.homeStageFilter!=="all"&&!configured.some(x=>x.code===state.homeStageFilter))state.homeStageFilter="all";
     const activeOrders=orders.filter(o=>o.laundry_status!=="delivered");
+    const otherOrders=activeOrders.filter(o=>!configured.some(x=>x.code===orderQuickStage(o)));
+    const stages=[{code:"all",name:"All active"},...configured,...(otherOrders.length?[{code:"__other",name:"Other active"}]:[])];
+    if(!stages.some(x=>x.code===state.homeStageFilter))state.homeStageFilter="all";
     let focusOrders;
-    if(state.homeStageFilter!=="all") focusOrders=activeOrders.filter(o=>homeStageMatch(o,state.homeStageFilter));
+    if(state.homeStageFilter!=="all") focusOrders=state.homeStageFilter==="__other"?otherOrders:activeOrders.filter(o=>homeStageMatch(o,state.homeStageFilter));
     else{
       const priority=o=>orderQuickStage(o)==="pickup_requested"?0:orderQuickStage(o)==="ready"?1:Number(o.outstanding||0)>0?2:3;
       focusOrders=activeOrders.filter(o=>["pickup_requested","ready"].includes(orderQuickStage(o))||Number(o.outstanding||0)>0).sort((a,b)=>priority(a)-priority(b)||String(b.updated_at||b.created_at||"").localeCompare(String(a.updated_at||a.created_at||"")));
       if(!focusOrders.length)focusOrders=activeOrders;
     }
+    const focusCount=focusOrders.length;
     focusOrders=focusOrders.slice(0,6);
     const selectedLabel=stages.find(x=>x.code===state.homeStageFilter)?.name||"All active";
-    const stageStrip=`<section class="home-stage-section"><div class="home-section-head"><b>Work by stage</b><span>Tap to focus</span></div><div class="home-stage-grid">${stages.map(x=>`<button class="home-stage-card ${state.homeStageFilter===x.code?'active':''}" data-home-stage="${esc(x.code)}"><span>${esc(x.name)}</span><b>${homeStageCount(x.code,s)}</b></button>`).join("")}</div></section>`;
-    const metrics=`<section class="home-dashboard-section"><div class="home-section-head"><b>Today</b><span>${esc(platformSettings().timezone||"")}</span></div><div class="home-kpi-grid"><div class="home-kpi"><span>Active orders</span><b>${Number(s.active_orders||0)}</b></div><div class="home-kpi due"><span>Outstanding</span><b>${fmt(s.outstanding)}</b></div><div class="home-kpi"><span>Collected</span><b>${fmt(s.payments_received)}</b></div><div class="home-kpi credit"><span>Customer credit</span><b>${fmt(s.customer_credits)}</b></div></div></section>`;
-    const quick=isOpsManager(role)?`<section class="home-quick-section compact-home-section"><div class="home-section-head"><b>Quick actions</b><span>One tap</span></div><div class="home-quick-actions home-quick-compact"><button class="home-quick-card" data-action="counter-order"><span class="home-quick-icon">${icon("orders")}</span><span><b>Counter order</b><small>At shop</small></span></button><button class="home-quick-card" data-action="pickup-request"><span class="home-quick-icon">${icon("pickup")}</span><span><b>Pickup request</b><small>Phone / WhatsApp</small></span></button><button class="home-quick-card" data-action="receive-payment"><span class="home-quick-icon">${icon("payment")}</span><span><b>Receive payment</b><small>Due / advance</small></span></button><button class="home-quick-card" data-action="new-customer"><span class="home-quick-icon">${icon("user")}</span><span><b>Add customer</b><small>New customer</small></span></button></div></section>`:"";
-    const attention=`<section class="home-attention-section"><div class="home-section-head"><b>${state.homeStageFilter==="all"?'Needs attention':esc(selectedLabel)}</b><span>${focusOrders.length} ${focusOrders.length===1?'case':'cases'}</span></div>${focusOrders.length?`<div class="home-attention-list">${focusOrders.map(homeAttentionCard).join("")}</div>`:`<div class="empty home-empty">No orders in this stage.</div>`}</section>`;
-    return `<div class="home-compact">${stageStrip}${metrics}${quick}${attention}</div>`;
+    const stageStrip=`<section class="home-stage-section"><div class="home-section-head"><b>Work by stage</b><span>Tap to focus</span></div><div class="home-stage-grid">${stages.map(x=>`<button class="home-stage-card ${state.homeStageFilter===x.code?'active':''}" data-home-stage="${esc(x.code)}" aria-pressed="${state.homeStageFilter===x.code}"><span>${esc(x.name)}</span><b>${x.code==="__other"?otherOrders.length:homeStageCount(x.code,s)}</b></button>`).join("")}</div></section>`;
+    const metrics=`<section class="home-dashboard-section"><div class="home-section-head"><b>Account overview</b><span>Current totals</span></div><div class="home-kpi-grid">${[["Outstanding",s.outstanding,"wallet","due"],["Payments collected",s.payments_received,"payment",""],["Customer credit",s.customer_credits,"user","credit"]].map(([label,value,i,cls])=>`<div class="home-kpi ${cls}"><span class="home-finance-icon">${icon(i)}</span><div><span>${label}</span><b>${fmt(value)}</b></div></div>`).join("")}</div></section>`;
+    const quick=isOpsManager(role)?`<section class="home-quick-section compact-home-section"><div class="home-section-head"><b>Quick actions</b></div><div class="home-quick-actions home-quick-compact"><button class="home-quick-card" data-action="counter-order"><span class="home-quick-icon">${icon("orders")}</span><span><b>Counter order</b><small>At shop</small></span></button><button class="home-quick-card" data-action="pickup-request"><span class="home-quick-icon">${icon("pickup")}</span><span><b>Pickup request</b><small>Phone / WhatsApp</small></span></button><button class="home-quick-card" data-action="receive-payment"><span class="home-quick-icon">${icon("payment")}</span><span><b>Receive payment</b><small>Due / advance</small></span></button><button class="home-quick-card" data-action="new-customer"><span class="home-quick-icon">${icon("user")}</span><span><b>Add customer</b><small>New customer</small></span></button></div></section>`:"";
+    const attention=`<section class="home-attention-section"><div class="home-section-head"><b>${state.homeStageFilter==="all"?'Needs attention':esc(selectedLabel)}</b><div class="home-queue-meta"><span>${focusCount} ${focusCount===1?'case':'cases'}</span><button class="home-view-all" data-view="orders">View orders ${icon("arrow","sm")}</button></div></div>${focusOrders.length?`<div class="home-attention-list">${focusOrders.map(homeAttentionCard).join("")}</div>`:`<div class="empty home-empty">No orders in this stage.</div>`}</section>`;
+    return `<div class="home-compact">${stageStrip}${metrics}<div class="home-workspace">${quick}${attention}</div></div>`;
   }
 
 
@@ -949,8 +957,8 @@
 
   function themeModal(){
     return `<div class="modal-backdrop"><form class="modal" id="themeForm"><div class="modal-head"><div><div class="kicker">Appearance</div><h2>Theme</h2></div><button type="button" class="x" data-action="close-modal">×</button></div>
-      <p class="sub">Light is the default. Switch to Graphite when you prefer a darker workspace.</p>
-      <div class="section theme-mode-grid"><button type="button" class="theme-mode ${state.mode==='graphite'?'active':''}" data-theme-mode="graphite"><span class="theme-preview graphite"></span><b>Graphite</b><small>Black + grey</small></button><button type="button" class="theme-mode ${state.mode==='light'?'active':''}" data-theme-mode="light"><span class="theme-preview light"></span><b>Light</b><small>White + soft grey</small></button></div>
+      <p class="sub">Choose your appearance. Saved on this device.</p>
+      <div class="section theme-mode-grid">${[["light","Light","Warm white"],["graphite","Dark","Soft charcoal"],["system","System","Device setting"]].map(([mode,label,desc])=>`<button type="button" class="theme-mode ${state.mode===mode?'active':''}" data-theme-mode="${mode}" aria-pressed="${state.mode===mode}"><span class="theme-preview ${mode}"></span><b>${label}</b><small>${desc}</small></button>`).join("")}</div>
       <div class="section"><div class="kicker">Accent</div><p class="small muted">Used mainly in Light mode and focus states.</p><div class="theme-grid">${THEME_PRESETS.map(c=>`<button type="button" class="theme-swatch ${state.theme===c?'active':''}" style="background:${c}" data-theme-color="${c}" aria-label="Use ${c}"></button>`).join("")}</div></div>
       <div class="section"><label>Custom accent<div class="theme-custom"><input id="themeColor" name="color" type="color" value="${state.theme}"><input class="input mono" id="themeHex" value="${state.theme}" maxlength="7" aria-label="Theme hex color"></div></label></div>
       <div class="section"><button class="btn primary block">Save theme</button></div>
