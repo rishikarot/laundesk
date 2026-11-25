@@ -27,7 +27,9 @@
     orderView: localStorage.getItem("laundry_order_view") || "optimal",
     orderFilters: new Set(),
     workflowMode: localStorage.getItem("laundry_workflow_mode") || "quick",
-    reportTab: "overview",
+    reportTab: "sales",
+    salesChartType: "bar",
+    salesChartMetric: "sales",
     reportPreset: localStorage.getItem("laundry_report_preset") || "this_month",
     reportGroup: localStorage.getItem("laundry_report_group") || "day",
     reportFrom: "",
@@ -63,7 +65,12 @@
   const quickStageKey = s => ["processing","washing","ironing"].includes(s)?"in_progress":["ready","out_for_delivery"].includes(s)?"ready":s;
   function workflowStages(){const rows=state.data?.refs?.settings?.workflow?.stages;return (Array.isArray(rows)&&rows.length?rows:DEFAULT_QUICK_STAGES).slice().sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))}
   function activeWorkflowStages(){return workflowStages().filter(x=>x.active!==false)}
-  function orderQuickStage(o){return o?.quick_stage_code||quickStageKey(o?.laundry_status||o)}
+  function orderQuickStage(o){
+    const physical=quickStageKey(o?.laundry_status||o),stored=o?.quick_stage_code;
+    if(physical==="delivered")return "delivered";
+    const custom=workflowStages().find(x=>x.code===stored&&!DEFAULT_QUICK_STAGES.some(d=>d.code===stored));
+    return custom&&quickStageKey(custom.system_status)===physical?stored:physical;
+  }
   function quickStageLabel(v){const code=typeof v==="object"?orderQuickStage(v):quickStageKey(v);return workflowStages().find(x=>x.code===code)?.name||stageLabel(code)}
   const roleName = r => ({super_admin:"Super Admin",admin:"Admin",manager:"Manager",delivery:"Delivery",customer:"Customer"}[r] || r);
   const id = x => document.getElementById(x);
@@ -472,7 +479,7 @@
   function customerPickup(){const a=state.data.actor,location=[a.door_no?`Door ${a.door_no}`:null,a.building_block||null,a.address||null].filter(Boolean).join(", ");return `${titleBlock("Doorstep","Request pickup","One request. Staff will assign the driver.")}<form id="pickupSelfForm" class="card stack"><label>Pickup address<textarea name="address" required>${esc(location)}</textarea></label><label>Note <textarea name="note" placeholder="Preferred time, landmark, special instruction..."></textarea></label><button class="btn primary block">REQUEST PICKUP →</button></form>`}
 
   function reportTabs(role){
-    if(["super_admin","admin","manager"].includes(role)) return [["overview","Overview"],["sales","Sales"],["customers","Customers"],["operations","Operations"],["payments","Payments"],["calendar","Calendar"]];
+    if(["super_admin","admin","manager"].includes(role)) return [["sales","Sales"],["overview","Overview"],["customers","Customers"],["operations","Operations"],["payments","Payments"],["calendar","Calendar"]];
     if(role==="delivery") return [["overview","My activity"],["operations","Operations"],["payments","Payments"],["calendar","Calendar"]];
     return [["overview","My report"],["payments","Payments"],["calendar","Calendar"]];
   }
@@ -530,7 +537,33 @@
 
   function salesRows(r){return (r.series||[]).map(x=>[x.key,x.orders||0,x.pieces||0,x.subtotal||0,x.discount_amount||0,x.tax_amount||0,x.sales||0,x.payments_received||0])}
   const SALES_HEADERS=["Period","Orders","Pieces","Gross rates","Discount","Recorded tax","Billed sales","Received"];
-  function reportSales(r){const p=r.period;return `<div class="report-section"><div class="report-section-head"><h2>Sales summary</h2><span class="report-note">Order date · payments by receipt date</span></div><div class="grid metrics report-metrics">${metric("Billed sales",reportMoney(p.sales),true)}${metric("Discounts",reportMoney(p.discount_amount))}${metric("Recorded tax",reportMoney(p.tax_amount))}${metric("Payments received",reportMoney(p.payments_received))}${metric("Orders",p.orders)}${metric("Pieces",p.pieces)}</div><p class="small muted">Billed sales include tax; advance receipts are not sales. Historical orders without tax snapshots may have unrecorded tax.</p></div><div class="report-section"><h2>Sales by ${esc(r.range.group||state.reportGroup)}</h2>${r.series?.length?`<div class="table-wrap report-table"><table><thead><tr>${SALES_HEADERS.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${salesRows(r).map(row=>`<tr>${row.map((v,i)=>`<td>${i>=3?reportMoney(v):esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`:`<div class="empty">No sales or payment activity in this period.</div>`}</div>`}
+  const SALES_CHART_METRICS={sales:"Billed sales",payments_received:"Payments received",orders:"Orders",pieces:"Garments"};
+  function salesChartRows(r){
+    const group=r.range?.group||state.reportGroup,range=r.loadedRange||r.range,values=new Map((r.series||[]).map(x=>[x.key,x]));
+    let d=new Date(range.from+"T00:00:00Z"),end=new Date(range.to+"T00:00:00Z");
+    if(!Number.isFinite(+d)||!Number.isFinite(+end))return r.series||[];
+    if(group==="week")d=addDays(d,1-(d.getUTCDay()||7));
+    if(group==="month")d.setUTCDate(1);if(group==="year")d.setUTCMonth(0,1);
+    const rows=[];while(d<=end){if(rows.length>=1500)return null;const k=dateKey(d).slice(0,group==="year"?4:group==="month"?7:10);rows.push(values.get(k)||{key:k});if(group==="year")d.setUTCFullYear(d.getUTCFullYear()+1);else if(group==="month")d.setUTCMonth(d.getUTCMonth()+1);else d=addDays(d,group==="week"?7:1);}
+    return rows;
+  }
+  function salesChartSVG(r){
+    const rows=salesChartRows(r);if(!rows?.length)return "";
+    const kind=state.salesChartType,metric=state.salesChartMetric,unit=["sales","payments_received"].includes(metric)?reportCurrencyCode():"count";
+    const values=rows.map(x=>Number(x[metric]||0)),max=Math.max(1,...values),min=Math.min(0,...values),span=max-min;
+    const w=Math.max(320,Math.min(12000,Math.max(Math.min(1180,document.documentElement.clientWidth-90),rows.length*52+100))),h=300,left=76,right=20,top=64,bottom=248,plotW=w-left-right,step=plotW/rows.length;
+    const y=v=>top+(max-v)/span*(bottom-top),x=i=>left+(i+.5)*step,base=y(0),dark=state.mode==="graphite",ink=dark?"#dce4ee":"#334155",grid=dark?"#424c58":"#e1e7ee",bg=dark?"#20252c":"#ffffff",accent=dark?"#91b9e9":"#5179a6";
+    const round=v=>Number(v.toFixed(2)),n=v=>Number(v.toFixed(2)).toLocaleString("en-US",{maximumFractionDigits:2}),full=(v)=>unit==="count"?n(v):unit+" "+Number(v).toFixed(2);
+    const points=values.map((v,i)=>`${round(x(i))},${round(y(v))}`).join(" "),skip=Math.max(1,Math.ceil(rows.length/Math.max(4,Math.floor(plotW/100))));
+    const ticks=Array.from({length:5},(_,i)=>{const v=max-span*i/4;return `<line x1="${left}" x2="${w-right}" y1="${y(v)}" y2="${y(v)}" stroke="${grid}"/><text x="${left-9}" y="${y(v)+4}" text-anchor="end" font-size="11">${esc(n(v))}</text>`}).join("");
+    const marks=kind==="bar"?values.map((v,i)=>`<rect x="${round(x(i)-Math.min(48,step*.66)/2)}" y="${round(Math.min(base,y(v)))}" width="${round(Math.min(48,step*.66))}" height="${round(Math.max(v===0?1:0,Math.abs(y(v)-base)))}" rx="2" fill="${accent}"><title>${esc(rows[i].key)}: ${esc(full(v))}</title></rect>`).join(""):`${kind==="area"?`<polygon points="${round(x(0))},${round(base)} ${points} ${round(x(values.length-1))},${round(base)}" fill="${accent}" opacity=".19"/>`:""}<polyline points="${points}" fill="none" stroke="${accent}" stroke-width="2.5" stroke-linejoin="round"/>${values.map((v,i)=>`<circle cx="${round(x(i))}" cy="${round(y(v))}" r="${rows.length>150?1.4:3.5}" fill="${accent}"><title>${esc(rows[i].key)}: ${esc(full(v))}</title></circle>`).join("")}`;
+    const labels=rows.map((r,i)=>i%skip===0||i===rows.length-1&&i%skip>skip/2?`<text x="${round(x(i))}" y="269" font-size="11" text-anchor="middle">${esc(r.key)}</text>`:"").join("");
+    const range=r.loadedRange||r.range;return `<svg id="salesChartSvg" xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(SALES_CHART_METRICS[metric])} ${kind} chart" font-family="Arial,sans-serif" fill="${ink}"><rect width="100%" height="100%" fill="${bg}"/><text x="20" y="25" font-size="17" font-weight="700">${esc(SALES_CHART_METRICS[metric])} · ${esc(unit)}</text><text x="20" y="43" font-size="11">${esc(range.from)} to ${esc(range.to)} · by ${esc(r.range.group||state.reportGroup)}</text>${ticks}<line x1="${left}" x2="${w-right}" y1="${base}" y2="${base}" stroke="${ink}" stroke-opacity=".45"/>${marks}${labels}</svg>`;
+  }
+  function salesChart(r){const svg=salesChartSVG(r);return `<section class="card sales-chart-card"><div class="sales-chart-controls"><div class="sales-chart-heading"><h2>Sales chart</h2><span class="small muted">Selected period · ${esc(reportCurrencyCode())}</span></div><div class="sales-chart-tools"><label class="chart-metric-label">Measure<select id="salesChartMetric">${Object.entries(SALES_CHART_METRICS).map(([k,v])=>`<option value="${k}" ${state.salesChartMetric===k?'selected':''}>${v}</option>`).join("")}</select></label><div class="chart-types" role="group" aria-label="Chart type">${["bar","line","area"].map(t=>`<button type="button" class="chip ${state.salesChartType===t?'active':''}" data-chart-type="${t}" aria-pressed="${state.salesChartType===t}">${t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div></div></div>${svg?`<div class="sales-chart-scroll">${svg}</div><div class="chart-downloads"><button class="btn smallbtn" data-action="chart-png">${icon("download","sm")} PNG</button><button class="btn smallbtn" data-action="chart-svg">${icon("download","sm")} SVG</button><span class="small muted">Download selected chart</span></div>`:`<div class="empty">Choose a larger grouping (week, month or year) to display this date range.</div>`}</section>`}
+  function saveChartBlob(blob,filename){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
+  async function downloadSalesChart(format){const svg=document.getElementById("salesChartSvg");if(!svg)return toast("No chart available",true);const src=new XMLSerializer().serializeToString(svg),blob=new Blob([src],{type:"image/svg+xml;charset=utf-8"}),filename=reportFilename(format).replace(/\.(png|svg)$/i,`-${state.salesChartMetric}-${state.salesChartType}.$1`);if(format==="svg"){saveChartBlob(blob,filename);return}const url=URL.createObjectURL(blob);try{const img=new Image();await new Promise((ok,fail)=>{img.onload=ok;img.onerror=()=>fail(new Error("Unable to render chart"));img.src=url});const canvas=document.createElement("canvas"),scale=Math.min(2,12000/img.naturalWidth);canvas.width=Math.round(img.naturalWidth*scale);canvas.height=Math.round(img.naturalHeight*scale);canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);const png=await new Promise(ok=>canvas.toBlob(ok,"image/png"));if(!png)throw new Error("Unable to create PNG");saveChartBlob(png,filename)}catch(e){toast(e.message,true)}finally{URL.revokeObjectURL(url)}}
+  function reportSales(r){const p=r.period;return `<div class="report-section"><div class="report-section-head"><h2>Sales summary</h2><span class="report-note">Order date · payments by receipt date</span></div><div class="grid metrics report-metrics">${metric("Billed sales",reportMoney(p.sales),true)}${metric("Discounts",reportMoney(p.discount_amount))}${metric("Recorded tax",reportMoney(p.tax_amount))}${metric("Payments received",reportMoney(p.payments_received))}${metric("Orders",p.orders)}${metric("Pieces",p.pieces)}</div><p class="small muted">Billed sales include tax; advance receipts are not sales. Historical orders without tax snapshots may have unrecorded tax.</p></div>${salesChart(r)}<div class="report-section"><h2>Sales by ${esc(r.range.group||state.reportGroup)}</h2>${r.series?.length?`<div class="table-wrap report-table"><table><thead><tr>${SALES_HEADERS.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${salesRows(r).map(row=>`<tr>${row.map((v,i)=>`<td>${i>=3?reportMoney(v):esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`:`<div class="empty">No sales or payment activity in this period.</div>`}</div>`}
 
   let xlsxLoader=null,pdfLoader=null;
   function loadScriptOnce(src,test,label="export library"){
@@ -580,7 +613,7 @@
     const role=state.data.actor.role,tabs=reportTabs(role),range=state.reportData?.loadedRange||reportRange();if(!tabs.some(([k])=>k===state.reportTab))state.reportTab=tabs[0][0];
     const content=state.reportLoading?reportLoading():state.reportError?`<div class="empty" role="alert">${esc(state.reportError)} <button class="btn smallbtn" data-report-retry>Retry</button></div>`:!state.reportData?`<div class="empty">Choose a period to load reports.</div>`:state.reportTab==="sales"?reportSales(state.reportData):state.reportTab==="customers"?reportCustomers(state.reportData):state.reportTab==="operations"?reportOperations(state.reportData):state.reportTab==="payments"?reportPayments(state.reportData):state.reportTab==="calendar"?reportCalendar(state.reportData):reportOverview(state.reportData);
     const exports=state.reportData&&!state.reportLoading?`<button class="btn smallbtn" data-action="export-excel">${icon("download","sm")}Excel</button><button class="btn smallbtn" data-action="export-pdf">${icon("download","sm")}PDF</button>`:"";
-    return `${titleBlock(role==="customer"?"My data":role==="delivery"?"My activity":"Business intelligence","Reports",state.reportTab==="calendar"?esc(state.reportCalendarMonth):`${range.label} · ${range.from} to ${range.to}`,exports)}${reportControls()}<div class="tabs report-tabs">${tabs.map(([k,l])=>`<button class="tab ${state.reportTab===k?'active':''}" data-report-tab="${k}">${l}</button>`).join("")}</div><div id="reportPanel">${state.reportData?.warnings?.length?`<div class="report-warning" role="status">${state.reportData.warnings.map(w=>`<div>${esc(w)}</div>`).join("")}</div>`:""}${content}</div>`;
+    return `${titleBlock(role==="customer"?"My data":role==="delivery"?"My activity":"Business intelligence","Reports",state.reportTab==="calendar"?esc(state.reportCalendarMonth):`${range.label} · ${range.from} to ${range.to}`,exports)}<div class="tabs report-tabs">${tabs.map(([k,l])=>`<button class="tab ${state.reportTab===k?'active':''}" data-report-tab="${k}">${l}</button>`).join("")}</div>${reportControls()}<div id="reportPanel">${state.reportData?.warnings?.length?`<div class="report-warning" role="status">${state.reportData.warnings.map(w=>`<div>${esc(w)}</div>`).join("")}</div>`:""}${content}</div>`;
   }
 
   function adminView(){
@@ -638,19 +671,26 @@
   function adminCatalog(){return `<div class="grid cards"><div class="card"><div class="row between"><h2>Garments</h2><button class="btn smallbtn primary" data-action="new-garment">+ Add</button></div><div class="list">${state.data.refs.garments.map(g=>`<div class="list-row"><div class="row between"><div><b>${esc(g.name)}</b><div class="small mono muted">${esc(g.code)}</div></div><span class="badge ${g.active?'paid':'unpaid'}">${g.active?'active':'off'}</span></div><button class="btn smallbtn" data-action="edit-garment" data-id="${g.id}">Edit</button></div>`).join("")}</div></div><div class="card"><div class="row between"><h2>Services</h2><button class="btn smallbtn primary" data-action="new-service">+ Add</button></div><div class="list">${state.data.refs.services.map(s=>`<div class="list-row"><div class="row between"><div><b>${esc(s.name)}</b><div class="small mono muted">${esc(s.workflow)}</div></div><span class="badge ${s.active?'paid':'unpaid'}">${s.active?'active':'off'}</span></div><button class="btn smallbtn" data-action="edit-service" data-id="${s.id}">Edit</button></div>`).join("")}</div></div></div>`}
   function adminDiscounts(){return `<div class="row between"><h2>Discounts</h2><button class="btn primary" data-action="new-discount">+ Discount</button></div><div class="list">${state.data.refs.discounts.map(d=>`<div class="list-row"><div class="row between"><div><b>${esc(d.name)}</b><div class="small muted">${d.discount_type==='percent'?d.value+'%':fmt(d.value)}</div></div><span class="badge ${d.active?'paid':'unpaid'}">${d.active?'active':'off'}</span></div><button class="btn smallbtn" data-action="edit-discount" data-id="${d.id}">Edit</button></div>`).join("")}</div>`}
 
+  const QUICK_ORDER=["pickup_requested","collected","received","in_progress","ready","delivered"];
+  function stageRank(code){return QUICK_ORDER.indexOf(quickStageKey(code))}
   function stageBar(order,mode=state.workflowMode){
+    const physical=order.laundry_status,current=orderQuickStage(order),rawTags=new Set(order.tagged_stages||[]);rawTags.add(physical);
+    const stages=workflowStages(),currentIdx=stages.findIndex(x=>x.code===current),role=state.data.actor.role,canChange=isOpsManager(role)&&physical!=="delivered";
+    const quickTags=new Set([...rawTags].map(quickStageKey));quickTags.add(current);
+    // Only actually recorded stages receive a tick. Skipped stages stay neutral.
+    const chip=(code,label,applied,tagged,earlier,actionable=false)=>{const cls=applied?"applied":tagged?"done":earlier?"skipped":"future",inner=`<span class="stage-check" aria-hidden="true">✓</span><span>${esc(label)}</span>`;return actionable?`<button type="button" class="stage ${cls}" data-action="set-quick-stage" data-id="${esc(order.id)}" data-status="${esc(code)}" title="Move to ${esc(label)}">${inner}</button>`:`<span class="stage ${cls}" ${applied?'aria-current="step"':''} title="${applied?'Current stage':tagged?'Recorded stage':earlier?'Not tagged':'Not reached'}">${inner}</span>`};
+    let html="";
     if(mode==="quick"){
-      const stages=workflowStages(),active=stages.filter(x=>x.active!==false),current=orderQuickStage(order),currentIdx=stages.findIndex(x=>x.code===current),role=state.data.actor.role,canChange=isOpsManager(role);
-      return `<div class="stagebar quick-stagebar quick-stage-actions">${active.map(st=>{const i=stages.findIndex(x=>x.code===st.code),done=currentIdx>=0&&i<currentIdx,applied=st.code===current,future=currentIdx<0||i>currentIdx,actionable=canChange&&future;const cls=done?'done':applied?'applied':future?'future':'';const inner=`<span class="stage-check">✓</span><span>${esc(st.name)}</span>`;return actionable?`<button type="button" class="stage ${cls}" data-action="set-quick-stage" data-id="${order.id}" data-status="${esc(st.code)}" title="Move directly to ${esc(st.name)}">${inner}</button>`:`<span class="stage ${cls}">${inner}</span>`}).join("")}</div><div class="small muted quick-stage-note">Tap any later stage. The order window stays open after applying a stage.${workflowSettings().confirm_stage_changes?' Confirmation is enabled in Super settings.':''}</div>`;
+      let visible=stages.filter(x=>x.active!==false||x.code===current);if(!visible.some(x=>x.code===current)){const fallback=DEFAULT_QUICK_STAGES.find(x=>x.code===current);if(fallback)visible=[...visible,fallback].sort((a,b)=>a.sort_order-b.sort_order)}
+      html=visible.map(st=>{const i=stages.findIndex(x=>x.code===st.code),applied=st.code===current,rank=stageRank(st.system_status||st.code),earlier=rank<stageRank(physical)||(currentIdx>=0&&i>=0&&i<currentIdx),future=!applied&&!earlier&&rank>=stageRank(physical)&&(currentIdx<0||i>currentIdx);return chip(st.code,st.name,applied,quickTags.has(st.code),earlier,canChange&&future&&st.active!==false)}).join("");
+    }else{
+      const workflows=new Set((order.items||[]).map(i=>i.service?.workflow).filter(Boolean)),generic=[...workflows].some(w=>["dry_clean","custom"].includes(w));
+      const visible=STAGES.filter(([k])=>{if(k===physical||rawTags.has(k))return true;if(order.channel==="counter"&&["pickup_requested","collected","out_for_delivery"].includes(k))return false;if(k==="processing")return generic||rawTags.has("in_progress");if(k==="washing")return !generic&&!(workflows.size===1&&workflows.has("iron_only"));if(k==="ironing")return !generic&&!(workflows.size===1&&workflows.has("wash_only"));return true});
+      const idx=STAGES.findIndex(([k])=>k===physical);
+      html=visible.map(([k,label])=>chip(k,label,k===physical,rawTags.has(k)||(k==="processing"&&rawTags.has("in_progress")),STAGES.findIndex(([s])=>s===k)<idx)).join("");
     }
-    const workflows=new Set((order.items||[]).map(i=>i.service?.workflow).filter(Boolean));
-    let visible=STAGES;
-    if([...workflows].some(w=>["dry_clean","custom"].includes(w))) visible=STAGES.filter(([s])=>!["washing","ironing"].includes(s));
-    else if(workflows.size===1&&workflows.has("iron_only")) visible=STAGES.filter(([s])=>!["washing","processing"].includes(s));
-    else if(workflows.size===1&&workflows.has("wash_only")) visible=STAGES.filter(([s])=>!["ironing","processing"].includes(s));
-    else visible=STAGES.filter(([s])=>s!=="processing");
-    const idx=visible.findIndex(([s])=>s===order.laundry_status);
-    return `<div class="stagebar">${visible.map(([s,l],i)=>`<span class="stage ${i<idx?'done':i===idx?'active':''}">${l}</span>`).join("")}</div>`;
+    const label=mode==="quick"?(workflowStages().find(s=>s.code===current)?.name||stageLabel(current)):stageLabel(physical);
+    return `<div class="stage-current-line"><span class="stage-current-dot"></span><b>Current: ${esc(label)}</b>${mode==="quick"&&physical==="out_for_delivery"?'<span>· Out for delivery</span>':mode==="detailed"&&current!==quickStageKey(physical)?`<span>· Quick: ${esc(workflowStages().find(x=>x.code===current)?.name||current)}</span>`:""}</div><div class="stagebar quick-stagebar synchronized-stages">${html}</div><div class="small muted quick-stage-note">${physical==="delivered"?'Delivered · workflow complete.':mode==="quick"&&canChange?'Tap any later stage.':'Recorded milestones only.'} Unchecked earlier stages were not tagged.</div>`;
   }
 
   async function setQuickStageAction(orderId,status,trigger){
@@ -691,15 +731,15 @@
           primary=o.pickup_driver_id?`<div class="order-waiting"><small>Next action</small><b>Awaiting driver collection</b></div>`:`<button class="order-next-action" data-action="assign" data-id="${o.id}" data-kind="pickup"><span class="next-copy"><small>Next action</small><b>Assign pickup driver</b></span>${icon("arrow")}</button>`;
         }else if(q && o.laundry_status==="ready" && o.channel==="pickup" && !o.delivery_driver_id){
           primary=`<button class="order-next-action" data-action="assign" data-id="${o.id}" data-kind="delivery" data-dispatch="true"><span class="next-copy"><small>Next action</small><b>Assign + send delivery</b></span>${icon("arrow")}</button>`;
-        }else if(q){
-          primary=`<button class="order-next-action" data-action="quick-advance" data-id="${o.id}"><span class="next-copy"><small>${q.sub}</small><b>${q.label}</b></span>${icon("arrow")}</button>`;
+        }else if(q && o.laundry_status==="ready" && o.channel==="pickup"){
+          primary=`<button class="order-next-action" data-action="quick-advance" data-id="${o.id}"><span class="next-copy"><small>Delivery</small><b>Send for delivery</b></span>${icon("arrow")}</button>`;
         }
       }else if(o.next_statuses?.[0]) primary=`<button class="order-next-action" data-action="advance" data-id="${o.id}" data-status="${o.next_statuses[0]}"><span class="next-copy"><small>Detailed stage</small><b>${esc(stageLabel(o.next_statuses[0]))}</b></span>${icon("arrow")}</button>`;
       secondary.push(orderActionButton("payment",o.id,"Payment","payment"));
       if(o.channel==="pickup") secondary.push(orderActionButton("assign",o.id,"Driver","driver",`data-kind="${o.laundry_status==='ready'||o.laundry_status==='out_for_delivery'?'delivery':'pickup'}"`));
     }
     secondary.push(orderActionButton("print-menu",o.id,"Print","print")); if(o.customer?.mobile)secondary.push(orderActionButton("whatsapp",o.id,"WhatsApp","whatsapp"));
-    const subStatus=state.workflowMode==="quick"&&o.laundry_status==="out_for_delivery"?`<span class="detail-substatus">Detailed: Out for delivery</span>`:"";
+    const subStatus="";
     state.modal=`<div class="modal-backdrop"><section class="modal order-modal"><div class="modal-head"><div><div class="kicker">${o.channel} order</div><h2 class="mono">${esc(o.order_no)}</h2></div><button class="x" data-action="close-modal">×</button></div>
       <div class="workflow-mode"><button class="${state.workflowMode==='quick'?'active':''}" data-workflow-mode="quick" data-id="${o.id}">Quick flow</button><button class="${state.workflowMode==='detailed'?'active':''}" data-workflow-mode="detailed" data-id="${o.id}">Detailed stages</button></div>
       ${stageBar(o)}${subStatus}
@@ -979,6 +1019,7 @@
     const stageFilter=e.target.closest("[data-filter-stage]");if(stageFilter){const key=stageFilter.dataset.filterStage||"all";if(key==="all")state.orderFilters.clear();else{if(state.orderFilters.has(key))state.orderFilters.delete(key);else state.orderFilters.add(key)}renderApp();return}
     const orderView=e.target.closest("[data-order-view]");if(orderView){state.orderView=orderView.dataset.orderView==="detailed"?"detailed":"optimal";localStorage.setItem("laundry_order_view",state.orderView);document.querySelectorAll("[data-order-view]").forEach(x=>x.classList.toggle("active",x.dataset.orderView===state.orderView));renderOrderList(state.data.actor.role!=="delivery");return}
     const workflow=e.target.closest("[data-workflow-mode]");if(workflow){state.workflowMode=workflow.dataset.workflowMode==="detailed"?"detailed":"quick";localStorage.setItem("laundry_workflow_mode",state.workflowMode);openOrder(workflow.dataset.id);return}
+    const chartType=e.target.closest("[data-chart-type]");if(chartType){state.salesChartType=chartType.dataset.chartType;renderApp();return}
     const reportTab=e.target.closest("[data-report-tab]");if(reportTab){const changedCalendar=(state.reportTab==="calendar")!==(reportTab.dataset.reportTab==="calendar");state.reportTab=reportTab.dataset.reportTab;if(changedCalendar)loadReports(true);else renderApp();return}
     if(e.target.closest("[data-report-retry]")){loadReports(true);return}
     const reportPreset=e.target.closest("[data-report-preset]");if(reportPreset){state.reportPreset=reportPreset.dataset.reportPreset;localStorage.setItem("laundry_report_preset",state.reportPreset);if(["this_year","last_year"].includes(state.reportPreset))state.reportGroup="month";else if(state.reportPreset!=="custom")state.reportGroup="day";localStorage.setItem("laundry_report_group",state.reportGroup);renderApp();loadReports(true);return}
@@ -1003,10 +1044,11 @@
     if(a==="open-order")return openOrder(b.dataset.id); if(a==="counter-order")return openCounter(); if(a==="pickup-request")return openPickupRequest(); if(a==="receive-payment")return openReceivePayment(); if(a==="new-customer")return openCustomer(); if(a==="edit-customer")return openCustomer(state.data.customers.find(c=>c.id===b.dataset.id)); if(a==="customer-account")return openCustomerFinance(b.dataset.id,b);
     if(a==="collect")return openCollect(b.dataset.id); if(a==="deliver")return openDeliver(b.dataset.id);
     if(a==="payment")return openPayment(state.data.orders.find(o=>o.id===b.dataset.id)); if(a==="assign")return openAssign(state.data.orders.find(o=>o.id===b.dataset.id),b.dataset.kind,b.dataset.dispatch==="true"); if(a==="print-menu")return openPrintMenu(state.data.orders.find(o=>o.id===b.dataset.id));
-    if(a==="advance")return doAction({action:"advance_order",order_id:b.dataset.id,target_status:b.dataset.status},`Moved to ${stageLabel(b.dataset.status)}`,b,"Updating stage…");
+    if(a==="advance"){const orderId=b.dataset.id,target=b.dataset.status;if(workflowSettings().confirm_stage_changes&&!confirm(`Move to ${stageLabel(target)}?`))return;try{setBusy(true,b,"Updating stage…");await api("/action",{method:"POST",body:{action:"advance_order",order_id:orderId,target_status:target}});await refresh();openOrder(orderId);toast(`Moved to ${stageLabel(target)}`)}catch(e){toast(e.message,true)}finally{setBusy(false)}return}
     if(a==="quick-advance")return doAction({action:"quick_advance",order_id:b.dataset.id},"Order updated",b,"Updating…");
     if(a==="credit")return doAction({action:"apply_credit",order_id:b.dataset.id},"Customer credit applied",b,"Applying credit…");
     if(a==="print-receipt")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"receipt",b); if(a==="print-labels")return printDoc(state.data.orders.find(o=>o.id===b.dataset.id),"labels",b); if(a==="whatsapp")return whatsapp(state.data.orders.find(o=>o.id===b.dataset.id));
+    if(a==="chart-png"||a==="chart-svg")return downloadSalesChart(a.slice(6));
     if(a==="export-excel")return exportExcel(b); if(a==="export-pdf")return exportPDF(b);
     if(a==="quick-save-rate"){const price=id("quickRatePrice")?.value,date=id("quickRateDate")?.value,garment=id("quickRateGarment")?.value,service=id("quickRateService")?.value;if(!garment||!service||price==="")return toast("Select garment, service and rate",true);return doAction({action:"save_rate",garment_type_id:garment,service_id:service,unit_price:price,effective_from:date},"Rate added",b,"Adding rate…")}
     if(a==="save-rate-row"){const row=document.querySelector(`[data-rate-row="${b.dataset.id}"]`),price=row?.querySelector("[data-rate-price]")?.value,date=row?.querySelector("[data-rate-date]")?.value;if(price===""||!date)return toast("Rate and effective date are required",true);return doAction({action:"save_rate",id:b.dataset.id,garment_type_id:b.dataset.garment,service_id:b.dataset.service,unit_price:price,effective_from:date},"Rate updated",b,"Saving rate…")}
@@ -1055,11 +1097,13 @@
     if(e.target?.id==="deliveryBuildingFilter"){state.deliveryBuildingFilter=e.target.value;renderApp();return}
     if(e.target?.id==="deliverySort"){state.deliverySort=e.target.value;renderApp();return}
     if(e.target?.form?.id==="reportCustomForm"){if(e.target.name==="from")state.reportDraftFrom=e.target.value;if(e.target.name==="to")state.reportDraftTo=e.target.value;}
+    if(e.target?.id==="salesChartMetric"){state.salesChartMetric=e.target.value;renderApp();return}
     if(e.target?.id==="reportCurrency"){state.reportCurrency=e.target.value;loadReports(true);return}
     if(e.target?.id==="reportGroup"){state.reportGroup=e.target.value;localStorage.setItem("laundry_report_group",state.reportGroup);loadReports(true)}
     if(e.target?.id==="reportCalendarMonth"&&e.target.value){state.reportCalendarMonth=e.target.value;loadReports(true)}
   });
 
+  let chartResizeTimer;window.addEventListener("resize",()=>{clearTimeout(chartResizeTimer);chartResizeTimer=setTimeout(()=>{const scroll=document.querySelector(".sales-chart-scroll");if(scroll&&state.reportData&&state.reportTab==="sales")scroll.innerHTML=salesChartSVG(state.reportData)},120)});
   window.addEventListener("online",()=>{if(state.token)refresh()});
   if(state.token) refresh(true); else renderLogin();
 })();
